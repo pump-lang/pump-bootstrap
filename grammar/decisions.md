@@ -103,3 +103,116 @@ core language. Reserving the words now keeps a future addition source
 compatible.
 
 ---
+
+## Part 1 - Statement termination and line continuation
+
+### D-1. Newline-driven terminator insertion, keyed on the last token
+
+**Decision.** The scanner turns a newline into a `terminator` token when the
+last significant token on the line is in the **closer set**:
+
+```
+identifier
+_                                     (the wildcard token)
+integer, float, char literal, closing " of a string
+keywords:  true  false  null  this  return  break  continue
+closers:   )  ]  }
+postfix:   ?  !
+```
+
+Otherwise the newline is discarded.
+
+**Why.** Exactly these tokens can end a complete expression, statement, type,
+or block. Everything else - a binary operator, `,`, `:`, `=`, `=>`, `.`,
+`..`, `::`, or an opening bracket - is by construction incomplete, so the line
+must continue. This gives the brief's requirement, "a line ending in a binary
+operator or an open bracket continues", for free, with no rule of its own and
+no backslash continuation.
+
+This is Go's automatic semicolon insertion with a Pump-shaped closer set. The
+additions relative to Go are `?` and `!` (Pump's postfix operators) and `_`.
+
+**Rejected.** Backslash line continuation - it collides with import paths
+(D-16) and with the string escape character, and it is a second way to say
+what the closer set already says.
+
+Grammar: section 8.2.
+
+### D-2. Suppression inside `(` and `[`; elision by lookahead
+
+**Decision.** Two refinements on top of D-1.
+
+**Bracket suppression.** While the innermost open bracket is `(`, `[`, or a
+string interpolation `{`, no terminator is inserted at all. While it is `{`, or
+there is no open bracket, insertion is active.
+
+**Elision.** An inserted terminator is discarded when the next significant
+token *cannot begin a statement*. That set is exactly:
+
+```
+else  catch
+.  ,  )  ]  }  :  =>  ::
++  -  *  /  %
+== != <  >  <= >=
+&& || &  |  ^  << >>
+.. ..=
+=  += -= *= /= %=
+```
+
+and nothing else. `(`, `[`, `{`, `!`, `?`, and every other keyword are
+deliberately **excluded**.
+
+**Why.** Bracket suppression is what makes the spec's comma-free struct literal
+work while call arguments still need commas. `{`-delimited constructs (blocks,
+struct/enum/interface bodies, match bodies, struct/map/set literals) keep
+newline separation; `(`/`[`-delimited ones (arguments, parameters, arrays,
+tuples, type arguments) wrap freely and use commas. That is one rule, not two
+special cases.
+
+Elision buys three things people actually write:
+
+```pump
+if x {
+}
+else {                    // `else` on its own line
+}
+
+let r = items
+    .map(f)               // leading-dot chains
+    .filter(g)
+
+let n = a
+      + b                 // leading-operator arithmetic
+```
+
+The exclusions matter more than the inclusions. Excluding `(` and `[` kills
+JavaScript's classic ASI hazard: these are two statements, not one call.
+
+```pump
+let a = b
+(c).d()
+```
+
+Excluding `!` and `?` prevents a following `!cond` or a stray `?` from silently
+gluing onto the previous line.
+
+**Consequence users must be told.** `return`, `break` and `continue` are in the
+closer set, so a returned value **must** start on the same line as `return`.
+`return\n    x` is a bare return followed by a separate statement. This is
+Go's rule and it is the price of having no semicolons.
+
+Grammar: sections 8.1, 8.3, 8.4.
+
+### D-3. `;` stays legal; a bare `;` is an empty statement
+
+**Decision.** An explicit `;` is a terminator anywhere a terminator is allowed,
+so `let a = 10; let b = 20` works as the spec shows. A `term` is **elidable**
+before `}` and before EOF, so `{ let a = 1 }` is legal on one line. A `term`
+on its own is an empty statement with no effect.
+
+**Why.** The spec says both "`;` is not required" and "a statement is ended by
+a newline or by `}`". Both are honoured literally.
+
+Grammar: section 6.
+
+---
