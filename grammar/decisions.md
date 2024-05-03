@@ -216,3 +216,45 @@ a newline or by `}`". Both are honoured literally.
 Grammar: section 6.
 
 ---
+
+## Part 2 - Statements versus expressions
+
+### D-4. Assignment is a statement, not an expression
+
+**Decision.** `=` `+=` `-=` `*=` `/=` `%=` are statement forms. They do not
+appear in the precedence table, cannot occur inside an expression, and do not
+chain. `if a = b` is a parse error. `a = b = c` is a parse error.
+
+**Why.** The `if (a = b)` bug is one of the most-reported classes of C defect,
+and the value of an assignment expression is used approximately never in the
+kind of code Pump is for. Removing it also shrinks the expression grammar by a
+level and makes the statement dispatcher simpler.
+
+The parser still parses a full postfix expression on the left and *then*
+validates it as an l-value, so the diagnostic is "cannot assign to a call"
+rather than an unhelpful parse failure.
+
+Grammar: 13.1, NOTE 13.1.2.
+
+### D-5. An expression statement must contain a call
+
+**Decision.** The only expressions allowed in statement position are those
+whose postfix chain contains at least one call, optionally followed by `?`,
+`!`, further member access, further calls, and `catch` clauses.
+
+Legal: `print(x)`, `user.greet()`, `do_file(p)!`,
+`load() catch { return }`, `items.map(f).filter(g)`.
+
+Errors, each reading "this expression has no effect": `a + b`, `x`,
+`user.name`.
+
+**Why.** Two payoffs. First, it is the spec's own position - the spec says
+explicitly that `a + b` on its own line does **not** become a return. Under
+this rule it is not even a statement. Second, it makes D-2's elision set
+provably safe: since no statement can begin with `+`, `-`, `*`, `&`, `.` or
+`=`, treating a line that starts with one of those as a continuation can never
+swallow a real statement.
+
+Grammar: 13.2.
+
+---
