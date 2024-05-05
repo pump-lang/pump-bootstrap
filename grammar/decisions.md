@@ -362,3 +362,55 @@ clusters as the unit (needs a Unicode table in the core language and a
 versioned one at that).
 
 ---
+
+## Part 4 - Operators
+
+### D-9. Operators Pump 1.0 does not have, and their diagnostics
+
+**Decision.** The following sequences are **not** tokens. Each is a lexical
+error with a **specific** message rather than "unexpected character":
+
+| Sequence | Message |
+|---|---|
+| `~` | `Pump 1.0 has no bitwise NOT; use x ^ -1` |
+| `&=` `\|=` `^=` `<<=` `>>=` | `Pump 1.0 has only = += -= *= /= %=` |
+| `->` | `Pump writes return types with ':', not '->'` |
+| `**` | `Pump has no exponent operator; use math.pow` |
+| `++` `--` | `Pump has no increment operator; use += 1` |
+| `@` `#` `$` | no attribute, directive or sigil in Pump 1.0 |
+
+`?.`, `??` and `?:` are likewise not tokens; `x?.y` already scans as `(x?).y`,
+which is what it should mean.
+
+**Why.** The spec's operator list has `& | ^ << >>` but no complement, and six
+assignment operators but no bitwise-assign. Those are real gaps. But *closing*
+them is an additive, non-breaking change the owner can make in 1.1, whereas
+inventing operators now risks diverging from the owner's intent for the sake
+of completeness. So: keep the operator set exactly as specified, and spend the
+effort on error messages instead. A user who types `~x` gets told what to write
+in one line, which is most of the value of having the operator, at none of the
+risk.
+
+**Recommended for 1.1**, flagged for owner sign-off: add unary `~`, and add
+`&= |= ^= <<= >>=`. Both are pure additions.
+
+### D-10. Precedence table; comparison and range are non-associative
+
+**Decision.** Thirteen levels, given in full in `precedence.md`. The two
+structural choices:
+
+- **Bitwise `&`, `^`, `|` bind tighter than comparison.** `a & b == c` is
+  `(a & b) == c`, not C's `a & (b == c)`.
+- **Comparison and range are non-associative.** `a < b < c` and `a..b..c` are
+  parse errors, not silent misreadings.
+
+**Why.** C's bitwise precedence is a fifty-year-old bug that every modern
+language has fixed; Pump follows Rust and Go.
+
+Non-associative comparison does double duty: it catches the
+mathematical-notation bug, and it is the second lock on P-1. With turbofish
+required for explicit type arguments *and* `<` unable to chain, there is no
+token sequence in expression position where the parser could be tempted to
+treat `<` as a bracket.
+
+Full table, worked examples, and the `>` splitting rule: `precedence.md`.
