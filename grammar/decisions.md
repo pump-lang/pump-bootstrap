@@ -258,3 +258,107 @@ swallow a real statement.
 Grammar: 13.2.
 
 ---
+
+## Part 3 - Numeric and primitive semantics
+
+### D-6. `int` and `uint` are 64-bit; overflow wraps
+
+**Decision.**
+
+- `int` is signed 64-bit two's complement.
+- `uint` is unsigned 64-bit.
+- `float` is IEEE-754 binary64.
+- There are no sized variants (`i8`, `u32`, ...) in 1.0. Those names are
+  reserved.
+- Overflow on `+`, `-`, `*`, `<<` **wraps**, two's complement, **identically in
+  debug and release builds**. Checked and saturating variants live in the
+  stdlib (`math.add_checked(a, b): int?`, and so on).
+- Overflow in a **compile-time constant expression** is a compile **error**,
+  not a wrap.
+
+**Why.** 64-bit is the only width that does not need thinking about on the
+target platform, and a single width keeps the type system and the numeric
+tower small.
+
+Wrapping is chosen over trapping for one dominant reason: **no
+debug/release divergence**. Rust's decision to trap in debug and wrap in
+release means a program's behaviour depends on its build profile, which is
+the single most surprising thing about Rust arithmetic. A wrapping default is
+deterministic, has no hidden branch, matches what the hardware and Cranelift
+do natively, and makes the checked APIs an explicit, visible opt-in - which is
+exactly Pump's "explicit behavior" philosophy.
+
+Constant expressions are the exception because there is no runtime cost to
+diagnosing them and a wrapped constant is always a typo.
+
+**Rejected.** Trapping on overflow everywhere (a branch on every arithmetic
+op, and a panic in code that legitimately wants modular arithmetic).
+Arbitrary-precision integers (a GC allocation on every add; wrong for a
+compiled systems-adjacent language).
+
+### D-7. Division, shifts, and the absence of implicit conversion
+
+**Decision.**
+
+- Integer `/` and `%` by zero **panic**. It is not undefined and not wrapped.
+- `%` takes the sign of the **dividend** (truncated division, as in C, Rust,
+  Go).
+- `int.min / -1` **wraps** to `int.min`, consistent with D-6, rather than
+  panicking. This is stated explicitly because it is exactly the case that
+  becomes a bug when it is left unstated.
+- `>>` is **arithmetic** on `int` (sign-extending) and **logical** on `uint`.
+- A shift count at or above the type's width yields `0`, or `-1` for a
+  negative `int >>`. A negative shift count **panics**. Shift counts are
+  **not** masked.
+- **There are no implicit numeric conversions of any kind**, in either
+  direction, `int` to `float` included. `int + uint` is a type error.
+  Conversions are calls on the type name: `int(x)`, `uint(x)`, `float(x)`,
+  `char(x)`, `string(x)`.
+- Untyped literals adapt to context (grammar 3.5). An integer literal defaults
+  to `int`; a float literal defaults to `float` and can never adopt `int`.
+  A literal that does not fit its adopted type is a compile error.
+
+**Why.** Masked shifts (`b & 63`) are an x86 artefact that produces
+inexplicable results on any other target; defining large shifts as 0 is
+portable and matches Go. No-implicit-conversion is the one rule that
+eliminates the entire class of silent-precision-loss and
+signed/unsigned-comparison bugs, and the cost - writing `float(n)` - is one
+call at a boundary.
+
+`-9223372036854775808` is handled by a narrow rule: an integer literal
+directly under unary `-` may be as large as 2^63 (grammar NOTE 3.5.3).
+Otherwise this famous constant would be unwritable.
+
+### D-8. `char` is a Unicode scalar value; `string` is immutable UTF-8
+
+**Decision.**
+
+- `char` is a **Unicode scalar value**, 32 bits: `0..0x10FFFF` excluding the
+  surrogate range `0xD800..0xDFFF`. Comparison is by code point. Arithmetic on
+  `char` is not allowed; use `uint(c)`.
+- `string` is **immutable** and **always valid UTF-8**. There is no way to
+  construct an invalid one, which is why `\xHH` is capped at `0x7F` (it is an
+  ASCII escape, not a byte escape).
+- `s.length` is a **byte count**.
+- **`string` is not indexable with `[]`.** `s[i]` is a compile error. Use
+  `s.chars()`, `s.bytes()`, `s.byte_at(i)`, `s.slice(a, b)`.
+- `for c in s` yields `char`.
+- `+` concatenates. `==` and `<` compare byte-wise, which for UTF-8 is also
+  code-point order.
+
+**Why.** Scalar-value `char` is the only definition under which `char` is
+closed under the operations people expect and under which a `string` is a
+sequence of `char`.
+
+Refusing `s[i]` is the load-bearing decision here. Every language that allows
+it has to pick between O(1)-but-wrong (bytes, so `s[0]` of a non-ASCII string
+is half a character) and correct-but-O(n) (scalars, so a loop is quadratic).
+Both are traps. Naming the operation you want - `byte_at` or `chars()` - makes
+the cost visible and the result unambiguous. `length` in bytes follows: it is
+the O(1) answer, and it is the one an allocator or an I/O call needs.
+
+**Rejected.** UTF-16 `char` (surrogate pairs leak into user code); grapheme
+clusters as the unit (needs a Unicode table in the core language and a
+versioned one at that).
+
+---
