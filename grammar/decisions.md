@@ -414,3 +414,131 @@ token sequence in expression position where the parser could be tempted to
 treat `<` as a bracket.
 
 Full table, worked examples, and the `>` splitting rule: `precedence.md`.
+
+### D-11. Block comments nest
+
+**Decision.** `/* a /* b */ c */` is one comment. A `//` comment does not
+consume its trailing newline - that newline is still tested by D-1.
+
+**Why.** Non-nesting block comments make "comment out this region" fail
+silently whenever the region contains a comment. The scanner cost is one
+counter.
+
+---
+
+## Part 5 - The overloaded punctuation
+
+### D-12. `set` is a reserved keyword
+
+**Decision.** `set` is one of the 27 keywords. It cannot be used as an
+identifier.
+
+**Why.** `set` introduces both a type constructor (`set<int>`) and a literal
+(`set{1, 2}`). A contextual keyword - "keyword only when followed by `{` or in
+type position" - would work, and was checked to be unambiguous. It was
+rejected anyway: contextual keywords are the single largest source of parser
+bugs and of confusing error messages, and Pump's stated philosophy is "simple
+syntax, fast compilation". Reserving one common noun is a small, visible cost;
+a contextual rule is an invisible one that keeps costing.
+
+Note the asymmetry with the type names: `int`, `uint`, `float`, `bool`, `char`,
+`string`, `void` and `Error` are **predeclared identifiers**, not keywords -
+but they are **non-shadowable**, so declaring `let int = 3` is an error. `set`
+is a keyword only because it also introduces a literal.
+
+### D-13. Postfix `?` propagates null; it does not force-unwrap
+
+**Decision.** `x?` on a value of type `T?` yields `T`. If the value is `null`,
+it **returns `null` immediately from the enclosing function**, which must have
+an optional return type. It is a compile error otherwise.
+
+Force-unwrap and defaulting live in the stdlib: `x.expect("msg")` panics with
+a message, `x.or(default)` substitutes.
+
+`T?` in type position is the optional-type suffix. The two roles never compete
+because types are parsed by a separate routine entered only from known type
+positions (grammar 9.4).
+
+**Why.** The spec flags `?` as needing disambiguation but does not say what
+postfix `?` *means*. Two readings were available: force-unwrap-or-panic
+(Kotlin `!!`, Swift `!`) or propagate (Rust `?`).
+
+Propagate wins on symmetry. Pump already has `x!` meaning "propagate the
+error"; making `x?` mean "propagate the null" gives one rule for both, with the
+enclosing function's return type as the target in both cases. Force-unwrap
+would make the two postfix operators mean opposite things - one propagates, one
+panics - for no reason a user could remember.
+
+It also fits "explicit behavior": a hidden panic is the least explicit thing a
+one-character operator can do.
+
+A pleasant consequence: because postfix operators chain left to right,
+`user?.name` parses as `((user)?).name`. It *reads* like optional chaining and
+*behaves* like propagation, which is the same thing at the use site. There is
+deliberately no `?.` token.
+
+**This is the decision most worth the owner's review**, since the spec's single
+example (`let actual = user?`) is consistent with either reading.
+
+### D-14. `T!` may appear only as a function return type
+
+**Decision.** The `!` type suffix is legal **only** on a function's return
+type, including the return type inside a function type. `let x: string!` is an
+error:
+
+```
+error: `!` may only be used on a function's return type
+  help: handle the error at the call site with `!` or `catch`
+```
+
+A value of a failable type must be consumed immediately by postfix `!` or by
+`catch`. `let x = do_file(p)` where `do_file` returns `string!` is an error
+reading "unhandled error; use `!` or `catch`".
+
+**Why.** This is the whole point of the spec's line "the goal is explicit error
+handling without turning into Rust's `Result<T, E>` everywhere". If `T!` were a
+first-class type it would appear in struct fields, in collections, in generic
+parameters, and Pump would have re-derived `Result` with worse syntax. Confining
+it to the return type makes failability a property of *calling*, not of
+*values*, and it means the checker never has to reason about a failable type in
+an arbitrary position.
+
+Suffix combinations: `T?!` is "error of optional", `T!?` is "optional of
+error"; both parse, applied left to right. `T??` and `T!!` parse and are
+rejected - optionals and error types do not nest.
+
+`void` exists as a return type so that a failable function returning nothing is
+`fn f(): void!`. A bare `!` return type is a syntax error with a hint pointing
+at `void!` - one spelling, not two.
+
+### D-15. `fail` - the error constructor the spec is missing
+
+**Decision.** Add the statement `fail <expr>`. It is legal only inside a
+function whose return type carries `!`, and it returns the error case. The
+operand must conform to the builtin `Error` interface; `string` conforms, so
+`fail "not found"` works.
+
+```pump
+fn do_file(path: string): string! {
+    if !exists(path) {
+        fail IoError { path: path }
+    }
+    return contents
+}
+```
+
+`fail` is a keyword, and it is the **only** way to produce the error case.
+
+**FLAGGED AS AN ADDITION BEYOND THE DRAFT SPEC.** The spec declares `T!`, shows
+propagation with `!` and handling with `catch`, but never shows how a function
+*produces* an error. Without something like `fail`, the feature is unusable -
+no program can ever reach the error path.
+
+**Why this shape.** The alternatives were worse. Overloading `return` so that
+"an expression whose type conforms to `Error` means the error case" is
+ambiguous the moment `T` itself conforms to `Error`, and it makes the meaning
+of a `return` depend on type inference. Wrapper functions (`return err(e)` /
+`return ok(v)`) re-introduce the `Result` shape that D-14 exists to avoid.
+`throw` carries exception baggage Pump explicitly does not want. `fail` is one
+keyword, reads as prose, is perfectly symmetric with `return`, and is
+unambiguous with zero lookahead.
