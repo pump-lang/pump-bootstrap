@@ -1,0 +1,1674 @@
+(* ==========================================================================
+   Pump Language Grammar - Pump Syntax 1.0
+   Complete lexical and syntactic grammar.
+
+   This file is normative for the lexer and parser. Where a rule cannot be
+   expressed in EBNF alone (context sensitivity, token splitting, newline
+   handling), the constraint is written as a numbered NOTE and is equally
+   normative.
+
+   Companion documents:
+     decisions.md   - every design decision and its rationale
+     precedence.md  - operator precedence and associativity table
+
+   Concurrency (`spawn`, `channel`) is OUT OF SCOPE for 1.0 and does not
+   appear here. `spawn` and `channel` are reserved words (see 2.4).
+   ========================================================================== *)
+
+
+(* ==========================================================================
+   0. NOTATION
+   ==========================================================================
+
+   "literal"        a terminal, matched exactly
+   'literal'        same; single quotes used when the terminal contains "
+   Name             a syntactic (parser) rule            - UpperCamelCase
+   name             a lexical (scanner) rule or a token  - lower_snake_case
+   A B              concatenation
+   A | B            alternation
+   ( A )            grouping
+   A?               zero or one
+   A*               zero or more
+   A+               one or more
+   A - B            the set of A not matching B
+   .                any single source character
+   (* text *)       comment
+
+   A rule name written with a suffix, e.g. Expression_ns, denotes the same
+   rule parsed under a parser mode. Modes are defined in section 9.
+   ========================================================================== *)
+
+
+(* ==========================================================================
+   1. SOURCE TEXT
+   ========================================================================== *)
+
+(* NOTE 1.1  A Pump source file is a sequence of Unicode scalar values encoded
+   as UTF-8. A leading U+FEFF byte-order mark is accepted and discarded. Any
+   other malformed UTF-8 is a lexical error.
+
+   NOTE 1.2  Source files use the extension `.pump`.
+
+   NOTE 1.3  Line terminators are LF (U+000A) and CRLF (U+000D U+000A). A CR
+   not followed by LF is a lexical error. All line terminators are normalised
+   to a single `newline` before any other lexical rule applies.
+
+   NOTE 1.4  Horizontal whitespace is SPACE (U+0020) and TAB (U+0009). No
+   other whitespace character is permitted outside a comment or a string
+   literal; in particular U+00A0, U+2028 and U+2029 are lexical errors. This
+   is deliberate: invisible characters must never change the meaning of a
+   program.
+
+   NOTE 1.5  Whitespace is not significant except that (a) it separates
+   tokens and (b) `newline` participates in terminator insertion (section 8).
+   No rule in this grammar depends on the presence or absence of a space
+   between two tokens. *)
+
+newline        = "\n" ;
+horizontal_ws  = " " | "\t" ;
+
+
+(* ==========================================================================
+   2. COMMENTS, IDENTIFIERS, KEYWORDS
+   ========================================================================== *)
+
+(* 2.1 Comments *)
+
+Comment        = LineComment | BlockComment ;
+LineComment    = "//" ( . - newline )* ;
+BlockComment   = "/*" ( BlockComment | ( . - ( "/*" | "*/" ) ) )* "*/" ;
+
+(* NOTE 2.1.1  Block comments NEST. `/* a /* b */ c */` is one comment.
+   This makes commenting out a region that already contains comments safe.
+
+   NOTE 2.1.2  A comment is equivalent to whitespace, with one exception: a
+   BlockComment that contains a newline behaves as a newline for the purpose
+   of terminator insertion (section 8). A LineComment does not consume its
+   trailing newline; that newline is still seen by the terminator rule.
+
+   NOTE 2.1.3  An unterminated BlockComment at end of file is an error. *)
+
+
+(* 2.2 Identifiers *)
+
+identifier     = ident_start ident_continue* ;
+ident_start    = "A".."Z" | "a".."z" | "_" ;
+ident_continue = ident_start | "0".."9" ;
+
+(* NOTE 2.2.1  Identifiers are ASCII only in 1.0. A non-ASCII identifier is a
+   lexical error whose message points at this rule.
+
+   NOTE 2.2.2  The single character `_` is NOT an identifier. It is its own
+   token, `underscore`, the wildcard. Of `_x`, `_`, `__`: the first and third
+   are identifiers, the second is `underscore`.
+
+   NOTE 2.2.3  Identifiers are compared byte for byte. There is no case
+   folding and no Unicode normalisation. *)
+
+underscore     = "_" ;
+
+
+(* 2.3 Keywords *)
+
+(* NOTE 2.3.1  The following 54 words are reserved and can never be used as
+   identifiers. *)
+
+keyword =
+      "as"        | "break"  | "catch"  | "const"   | "continue"
+    | "else"      | "enum"   | "fail"   | "false"   | "fn"
+    | "for"       | "if"     | "implements"         | "import"
+    | "in"        | "interface"         | "let"     | "match"
+    | "null"      | "private"           | "pub"     | "return"
+    | "set"       | "struct" | "this"   | "true"    | "while"
+    ;
+
+(* NOTE 2.3.2  `set` is a keyword because it introduces both a type
+   constructor (`set<int>`) and a literal (`set{1, 2}`). Making it a
+   contextual keyword was considered and rejected; see decisions.md D-12. *)
+
+
+(* 2.4 Reserved words (unused in 1.0) *)
+
+(* NOTE 2.4.1  The following are reserved but have no meaning in 1.0. Using
+   one is an error whose message says "reserved for a future version of
+   Pump", never a generic parse error. Reserving them now keeps 1.1 additions
+   source compatible. *)
+
+reserved_word =
+      "async" | "await"  | "channel" | "defer"  | "do"     | "dyn"
+    | "extern"| "finally"| "go"      | "impl"   | "loop"   | "macro"
+    | "module"| "mut"    | "new"     | "package"| "ref"    | "select"
+    | "self"  | "spawn"  | "static"  | "switch" | "throw"  | "trait"
+    | "try"   | "type"   | "typeof"  | "unsafe" | "use"    | "var"
+    | "where" | "yield"
+    ;
+
+
+(* 2.5 Predeclared identifiers *)
+
+(* NOTE 2.5.1  These are ordinary identifiers bound in an implicit outermost
+   scope, NOT keywords. They may appear anywhere an identifier may appear.
+
+   Non-shadowable (declaring a binding with one of these names is an error):
+       bool  int  uint  float  char  string  void  Error
+
+   Shadowable (prelude values; a user declaration silently shadows them):
+       print  println  panic  assert  len
+       read_file_text  read_file_bytes  write_file_text  write_file_bytes
+       os_args  os_run  os_error
+
+   NOTE 2.5.1a  The seven on the second and third lines are the raw way in to
+   the operating system, and they are named long and oddly on purpose: the
+   prelude is visible in every file, so a short name there would be in
+   everybody's way. They report failure the C way - a null, or a `false` -
+   with the reason readable from `os_error()`. Nobody should write them
+   directly. `std/io.pump` and `std/os.pump` wrap all seven in functions that
+   return `T!` and `fail` with a message, which is the surface to use.
+
+   NOTE 2.5.2  The conversion functions `int(x)`, `uint(x)`, `float(x)`,
+   `char(x)`, `string(x)` are calls on the non-shadowable type names. A type
+   name in call position is a conversion; in type position it is a type.
+
+   NOTE 2.5.3  `length` is not in this list. It is a builtin pseudo-field on
+   arrays, maps, sets and strings, reached by ordinary field access
+   (`items.length`). It is not a method and takes no parentheses. *)
+
+
+(* ==========================================================================
+   3. LITERALS
+   ========================================================================== *)
+
+(* 3.1 Integer literals *)
+
+integer_literal = dec_literal | hex_literal | oct_literal | bin_literal ;
+
+dec_literal   = dec_digit ( dec_digit | "_" dec_digit )* ;
+hex_literal   = "0x" hex_digit ( hex_digit | "_" hex_digit )* ;
+oct_literal   = "0o" oct_digit ( oct_digit | "_" oct_digit )* ;
+bin_literal   = "0b" bin_digit ( bin_digit | "_" bin_digit )* ;
+
+dec_digit = "0".."9" ;
+hex_digit = dec_digit | "a".."f" | "A".."F" ;
+oct_digit = "0".."7" ;
+bin_digit = "0" | "1" ;
+
+(* NOTE 3.1.1  `_` is a digit separator. It must sit BETWEEN two digits.
+   `1_000` and `0xFF_FF` are legal; `_1`, `1_`, `0x_1`, `1__0` are errors.
+
+   NOTE 3.1.2  There are no literal type suffixes (`42i64`) in 1.0. Literals
+   are untyped; see 3.5.
+
+   NOTE 3.1.3  A leading `0` does not mean octal. `010` is ten. Octal is
+   `0o10`. *)
+
+
+(* 3.2 Float literals *)
+
+float_literal =
+      dec_literal "." dec_literal exponent?
+    | dec_literal exponent
+    ;
+exponent = ( "e" | "E" ) ( "+" | "-" )? dec_literal ;
+
+(* NOTE 3.2.1  A float literal must have a digit on BOTH sides of the `.`.
+   `1.` and `.5` are not float literals. That is what makes `0..10` scan.
+
+   NOTE 3.2.2  SCANNER RULE (critical). While scanning a number, a `.` is
+   consumed as a decimal point only if the character after it is a decimal
+   digit. Consequences:
+       0..10     ->  integer(0)  ".."  integer(10)
+       0..=10    ->  integer(0)  "..=" integer(10)
+       1.max()   ->  integer(1)  "."   ident(max) "(" ")"
+       1.5       ->  float(1.5)
+
+   NOTE 3.2.3  There is no hexadecimal float literal.
+
+   NOTE 3.2.4  There is no literal for infinity or NaN. The prelude provides
+   `float.inf` and `float.nan`. *)
+
+
+(* 3.3 Character literals *)
+
+char_literal = "'" ( char_body | escape ) "'" ;
+char_body    = . - ( "'" | "\\" | newline ) ;
+
+(* NOTE 3.3.1  A char literal holds exactly one Unicode scalar value. A
+   multi-scalar grapheme cluster is an error; use a string.
+
+   NOTE 3.3.2  A raw newline inside a char literal is an error. Use `'\n'`. *)
+
+
+(* 3.4 String literals and interpolation *)
+
+(* A string literal is not a single token. The scanner emits a bracketed
+   token sequence so the parser can reuse Expression for interpolations. *)
+
+StringLiteral =
+      string_start
+      ( string_text
+      | interp_start Expression interp_end
+      )*
+      string_end
+    ;
+
+string_start = '"' ;
+string_end   = '"' ;
+string_text  = ( plain_char | escape )+ ;
+plain_char   = . - ( '"' | "\\" | "{" | newline ) ;
+interp_start = "{" ;   (* inside a string literal only *)
+interp_end   = "}" ;   (* inside a string literal only *)
+
+escape =
+      "\\n" | "\\r" | "\\t" | "\\0" | "\\\\" | '\\"' | "\\'"
+    | "\\{" | "\\}"
+    | "\\x" hex_digit hex_digit
+    | "\\u{" hex_digit hex_digit? hex_digit? hex_digit?
+             hex_digit? hex_digit? "}"
+    ;
+
+(* NOTE 3.4.1  SCANNER PROTOCOL. On `"` the scanner enters string mode and
+   emits `string_start`. It then emits one `string_text` per maximal run of
+   plain characters and escapes. On an unescaped `{` it emits `interp_start`,
+   leaves string mode, and resumes normal tokenising until the matching `}`
+   (tracking nesting of `{}`, `()`, `[]` and of nested string literals), at
+   which point it emits `interp_end` and re-enters string mode. On the
+   closing `"` it emits `string_end`. The parser therefore parses an
+   interpolation with its ordinary Expression routine.
+
+   NOTE 3.4.2  An unescaped `}` in string text is a literal `}`. Only a `}`
+   that closes an open `interp_start` at the current nesting level ends an
+   interpolation. `"a } b"` is the five-character string `a } b`. To write a
+   literal `{`, use `\{`. `\}` is accepted and equals `}`.
+
+   NOTE 3.4.3  A raw newline may not appear inside a string literal,
+   INCLUDING inside an interpolation. Multi-line text uses `\n` or repeated
+   concatenation. Consequence: terminator insertion (section 8) never fires
+   inside a string literal.
+
+   NOTE 3.4.4  Interpolations nest: `"{f("{x}")}"` is legal. Implementations
+   may impose a nesting limit; it must be at least 32.
+
+   NOTE 3.4.5  `\u{...}` takes 1 to 6 hex digits. The value must be a Unicode
+   scalar value: at most 0x10FFFF and outside 0xD800..0xDFFF. `\xHH` must be
+   at most 0x7F - it is an ASCII escape, not a byte escape, because a
+   `string` is always valid UTF-8 and there must be no way to write an
+   invalid one.
+
+   NOTE 3.4.6  An unknown escape such as `\q` is an error, not a literal `q`.
+
+   NOTE 3.4.7  An empty interpolation `"{}"` is an error.
+
+   NOTE 3.4.8  Adjacent string literals are NOT concatenated. Use `+`.
+
+   NOTE 3.4.9  The expression inside an interpolation must be `bool`, `int`,
+   `uint`, `float`, `char`, `string`, or a type conforming to the builtin
+   `Stringable` interface (`fn to_string(): string`). There is no format
+   specifier syntax in 1.0. *)
+
+
+(* 3.5 Literal typing *)
+
+(* NOTE 3.5.1  An integer_literal is UNTYPED. It adopts the type demanded by
+   its context - `int`, `uint`, or `float`. With no contextual type it
+   defaults to `int`. A float_literal is untyped and defaults to `float`; it
+   may not adopt `int` or `uint`.
+
+   NOTE 3.5.2  A literal that does not fit its adopted type is a compile
+   error at the literal's span. It is never wrapped.
+
+   NOTE 3.5.3  `-9223372036854775808` is legal: an integer_literal appearing
+   directly as the operand of unary `-` may be as large as 2^63 when its
+   adopted type is `int`. In every other position the maximum is 2^63 - 1. *)
+
+
+(* ==========================================================================
+   4. OPERATORS AND PUNCTUATION
+   ==========================================================================
+
+   NOTE 4.1  Tokens are scanned by maximal munch: the longest sequence that
+   forms a token wins. Consequences worth stating:
+       x!=y   ->  ident "!=" ident      (never `x!` then `= y`)
+       a<<b   ->  ident "<<" ident
+       a<-b   ->  ident "<" "-" ident   (there is no `<-` token)
+       ..=    ->  "..="                 (never ".." then "=")
+       ::     ->  "::"                  (never ":" then ":")
+   Section 9.2 defines the one place where maximal munch is undone. *)
+
+operator =
+    (* arithmetic *)
+      "+" | "-" | "*" | "/" | "%"
+    (* comparison *)
+    | "==" | "!=" | "<" | ">" | "<=" | ">="
+    (* logical *)
+    | "&&" | "||" | "!"
+    (* bitwise *)
+    | "&" | "|" | "^" | "<<" | ">>"
+    (* assignment *)
+    | "=" | "+=" | "-=" | "*=" | "/=" | "%="
+    (* range *)
+    | ".." | "..="
+    (* other *)
+    | "." | "?" | "=>" | "::" | "..."
+    ;
+
+punctuation = "(" | ")" | "[" | "]" | "{" | "}" | "," | ":" | ";" | "\\" ;
+
+(* NOTE 4.2  `!` is one token used in four roles. Position alone
+   disambiguates; see 9.3.
+
+   NOTE 4.3  `?` is one token used in two roles; see 9.4. There is no `?.`
+   token and no `??` token - `user?.name` scans as `?` `.` `name`.
+
+   NOTE 4.4  `\` is a token ONLY between the segments of an import path
+   (10.2). Anywhere else, outside a string or comment, it is a lexical error.
+
+   NOTE 4.5  The character sequences `~`, `&=`, `|=`, `^=`, `<<=`, `>>=`,
+   `->`, `**`, `++`, `--`, `@`, `#`, `$` are NOT tokens. Each is a lexical
+   error carrying a specific message rather than a generic "unexpected
+   character"; see decisions.md D-9.
+
+   NOTE 4.6  `...` appears only as the variadic marker in a parameter list
+   and in a function type. *)
+
+
+(* ==========================================================================
+   5. TOKENS
+   ========================================================================== *)
+
+token =
+      identifier | underscore | keyword
+    | integer_literal | float_literal | char_literal
+    | string_start | string_text | interp_start | interp_end | string_end
+    | operator | punctuation
+    | terminator
+    ;
+
+
+(* ==========================================================================
+   6. THE `term` TOKEN
+   ==========================================================================
+   `terminator` is produced by section 8. In the syntactic grammar it is
+   written `term`:
+
+       term = ( ";" | inserted_terminator )+ ;
+
+   NOTE 6.1  `term` is ELIDABLE before `}` and before end of file. Everywhere
+   the grammar writes `term`, the empty string is also accepted when the next
+   token is `}` or EOF. That is what makes `{ let a = 1 }` legal on one line,
+   and it matches the specification's "a statement is ended by a newline or
+   by `}`".
+
+   NOTE 6.2  A `term` on its own is an empty statement. It is legal and has
+   no effect, so `;;` and blank lines are fine.
+   ========================================================================== *)
+
+
+(* ==========================================================================
+   7. (reserved section number)
+   ========================================================================== *)
+
+
+(* ==========================================================================
+   8. NEWLINE HANDLING - TERMINATOR INSERTION
+   ==========================================================================
+
+   Pump has no mandatory `;`. The scanner converts some newlines into a
+   `terminator` token and discards the rest. The rule is deterministic and
+   needs one token of lookbehind plus one token of lookahead.
+
+   Definitions.
+     "Last token"    the last token emitted before the newline, ignoring
+                     whitespace and comments. A LineComment does not count as
+                     a token; the newline that ends it is still tested.
+     "Next token"    the first token after the newline, skipping further
+                     newlines, whitespace and comments.
+     "Bracket stack" the stack of currently open `(`, `[`, `{`, and
+                     `interp_start`.
+
+   8.1  SUPPRESSION BY BRACKET.
+        If the innermost open bracket is `(`, `[`, or `interp_start`, the
+        newline is discarded and no terminator is inserted.
+        If the innermost open bracket is `{`, or the stack is empty, rules
+        8.2 and 8.3 apply.
+
+        Consequence: call arguments, parenthesised expressions, array
+        literals, tuple literals, parameter lists and type argument lists
+        may be wrapped freely across lines and REQUIRE commas between
+        elements. Brace-delimited constructs - blocks, struct bodies, enum
+        bodies, interface bodies, match bodies, struct literals, map literals
+        and set literals - keep newline separation, which is exactly what the
+        specification's comma-free struct literal needs.
+
+   8.2  INSERTION.
+        A terminator is inserted after the newline if the LAST TOKEN is in
+        the following set (the "closer set"):
+
+          identifier
+          underscore
+          integer_literal, float_literal, char_literal, string_end
+          the keywords:  true  false  null  this  return  break  continue
+          the closing brackets:  )  ]  }
+          the postfix operators:  ?  !
+
+        Otherwise the newline is discarded.
+
+        Rationale: exactly these tokens can end a complete expression,
+        statement, type, or block. Everything else - a binary operator, a
+        comma, a colon, an opening bracket, `=`, `=>`, `.`, `..`, `::` - is
+        by construction incomplete, so the line continues. Line continuation
+        therefore needs no backslash and no special case: a line ending in a
+        binary operator or an open bracket continues.
+
+   8.3  ELISION BY LOOKAHEAD.
+        An inserted terminator is DISCARDED if the NEXT TOKEN cannot begin a
+        statement. That set is, exactly:
+
+          else   catch
+          .   ,   )   ]   }   :   =>   ::
+          +   -   *   /   %
+          ==  !=  <   >   <=  >=
+          &&  ||  &   |   ^   <<  >>
+          ..  ..=
+          =   +=  -=  *=  /=  %=
+
+        and nothing else. Note what is NOT in this set: `(`, `[`, `{`, `!`,
+        `?`, and every keyword other than `else` and `catch`.
+
+        Consequences:
+          - `else` and `catch` let the closing `}` and the continuation sit
+            on separate lines:
+                if x {
+                }
+                else {
+                }
+          - `.` gives leading-dot method chains:
+                let r = items
+                    .map(f)
+                    .filter(g)
+          - Binary operators give leading-operator arithmetic:
+                let n = a
+                      + b
+          - `(` and `[` are deliberately EXCLUDED, which kills JavaScript's
+            classic ASI hazard. These are two statements, not one:
+                let a = b
+                (c).d()
+          - `!` is excluded because `!x` is a prefix operator; including it
+            would silently glue a following `!cond` onto the previous line.
+          - `?` is excluded for the same reason as `(`.
+
+   8.4  CONSEQUENCES THAT MUST BE DOCUMENTED TO USERS.
+        `return`, `break` and `continue` are in the closer set, so a returned
+        value MUST begin on the same line as `return`:
+              return
+              x
+        is a bare `return` followed by a separate statement, not `return x`.
+        This is Go's rule and it is the price of having no semicolons.
+
+   8.5  END OF FILE.
+        A terminator is inserted at end of file if the last token is in the
+        closer set. An unclosed bracket at EOF is an error.
+   ========================================================================== *)
+
+
+(* ==========================================================================
+   9. PARSER MODES AND CONTEXT-SENSITIVE RULES
+   ==========================================================================
+   Six places require the parser to do something plain EBNF cannot express.
+   All six are normative.
+
+   9.1  MODE `ns` - "no bare composite literal". Written as a rule suffix:
+        Expression_ns.
+
+        While this mode is active, a `{` token NEVER begins a struct literal
+        or a map literal. It always terminates the current expression. The
+        mode is entered when parsing:
+            - the condition of `if`
+            - the condition of `while`
+            - the iterable of `for ... in`
+            - the scrutinee of `match`
+            - a match arm guard
+            - the operand of `catch` in its value form
+        The mode is CLEARED inside `(`, `[`, and inside a call argument list,
+        and RE-ENTERED for a nested `if`/`while`/`for`/`match` header.
+
+        `set{...}` is exempt: `set` is a keyword and cannot begin a block, so
+        `while set{1, 2}.has(x) { ... }` is unambiguous and legal.
+
+        REQUIRED DIAGNOSTIC. When, in mode `ns`, the parser has just reduced
+        a PathExpression and the very next token is `{`, it must not report a
+        generic error. It must report:
+
+            error: struct literals are not allowed in the header of
+                   if / while / for / match
+              help: wrap it in parentheses
+                    if user == (User { name: "x" }) {
+
+        The same message is required after `catch`.
+
+        Consequently a bare map literal cannot open such a header either;
+        `while ({1: 2}).length > 0 {` needs the parentheses. This is Go's
+        rule, applied uniformly.
+
+   9.2  `>` SPLITTING IN TYPE ARGUMENT LISTS.
+        Maximal munch produces `>>`, `>=` and `>>=`. Inside a type argument
+        list, when the parser needs a closing `>` and sees one of these, it
+        SPLITS the token, consuming one `>` and pushing back the remainder:
+
+            >>   ->  >  and  >
+            >=   ->  >  and  =
+            >>=  ->  >  and  >=
+
+        This makes `Box<Box<int>>`, `set<set<int>>` and
+        `let b: Box<Box<int>>= v` all parse. Splitting happens only in type
+        argument position - a type's `<...>` list and a turbofish `::<...>`
+        list. It never happens in an expression.
+
+   9.3  `!` - FOUR ROLES, DISAMBIGUATED BY POSITION.
+        (a) `!=` is a single token from maximal munch and never reaches the
+            parser as `!`.
+        (b) In PREFIX position - where the parser expects the start of an
+            operand - `!` is logical NOT, at unary precedence.
+        (c) In POSTFIX position - where the parser holds a complete operand
+            and expects an operator - `!` is error propagation, at postfix
+            precedence, tighter than everything.
+        (d) In TYPE position - inside the Type routine - a trailing `!` is
+            the error-type suffix. Types are parsed by a distinct recursive
+            descent entered only from known type positions, so (d) never
+            competes with (b) or (c).
+        There is no whitespace rule. `a !b` parses as `(a!)` followed by `b`,
+        which is then a parse error at `b`; `a! b` gives the identical error.
+        Position, not spacing.
+
+   9.4  `?` - TWO ROLES, DISAMBIGUATED BY POSITION.
+        (a) In POSTFIX position in an expression, `?` is optional unwrap /
+            null propagation, at postfix precedence.
+        (b) In TYPE position, a trailing `?` is the optional-type suffix.
+        Same separation as 9.3(d). There is no prefix `?`, no ternary `?:`,
+        and no `?.` token, so `?` can never be mistaken for anything else.
+        Turbofish is the two tokens `::` then `<`; `?` never precedes `::` in
+        any well-typed program, and `a?::<int>()` - which does scan - is
+        rejected by the checker, not by the parser.
+
+   9.5  NAMED ARGUMENT LOOKAHEAD.
+        Inside a call argument list, `identifier ":"` (two tokens) begins a
+        named argument. Two tokens of lookahead are sufficient and necessary;
+        nothing else in expression position can start with `identifier ":"`.
+
+   9.6  TUPLE FIELD ACCESS.
+        Immediately after a `.` token the scanner scans a run of decimal
+        digits as a tuple index, never as a float. So `t.0.1` is
+        `t . 0 . 1`, two tuple accesses, not `t . 0.1`.
+   ========================================================================== *)
+
+
+(* ==========================================================================
+   10. SYNTACTIC GRAMMAR - FILE STRUCTURE
+   ========================================================================== *)
+
+(* 10.1 File *)
+
+File =
+      term?
+      ImportDeclaration*
+      TopLevelDeclaration*
+      EOF
+    ;
+
+(* NOTE 10.1.1  All imports precede all other declarations. An import after a
+   declaration is an error reading "imports must appear at the top of the
+   file".
+
+   NOTE 10.1.2  Top-level declarations are order independent: a function may
+   call a function declared later in the file, and a struct may reference a
+   struct declared later.
+
+   NOTE 10.1.3  A file with no declarations is legal. *)
+
+
+(* 10.2 Imports *)
+
+ImportDeclaration = "import" ModulePath ( "as" identifier )? term ;
+ModulePath        = identifier ( "\\" identifier )* ;
+
+(* NOTE 10.2.1  The separator is a BACKSLASH, per the specification. See
+   decisions.md D-16, which flags this as unusual and lists `/` and `.` as
+   alternatives. It is kept because changing it is the owner's call.
+
+   NOTE 10.2.2  SCANNER RULE. `\` is not a general token. The scanner emits
+   it only while scanning a ModulePath - that is, in the token position
+   immediately following the `import` keyword, or immediately following an
+   identifier that itself followed `import` or `\`. Everywhere else outside a
+   string or comment, `\` is a lexical error reading "unexpected `\`; the
+   backslash is only valid inside a string literal and in an import path".
+
+   NOTE 10.2.3  A ModulePath must lie entirely on one line. Because
+   `identifier` is in the closer set (8.2) and `\` is not in the elision set
+   (8.3), a newline after a segment ends the import, which is the desired
+   behaviour; a newline after a `\` is an explicit error rather than a silent
+   continuation.
+
+   NOTE 10.2.4  Whitespace around `\` is accepted by the scanner but is a
+   style error. `import net \ http` means `import net\http`.
+
+   NOTE 10.2.5  Without `as`, the import binds the LAST segment: `import
+   net\http` binds `http`. With `as`, it binds the alias. Two imports binding
+   the same name in one file is an error.
+
+   NOTE 10.2.6  There is no `pub import`; imports are private to their file.
+   There is no wildcard or selective import in 1.0.
+
+   NOTE 10.2.7  RESOLUTION (driver policy, recorded here for completeness).
+   `import a\b\c` resolves to the file `a/b/c.pump` relative to the project
+   root, which is the directory containing the entry file. Each file is one
+   module. *)
+
+
+(* 10.3 Top-level declarations *)
+
+TopLevelDeclaration =
+      Visibility? FunctionDeclaration
+    | Visibility? StructDeclaration
+    | Visibility? EnumDeclaration
+    | Visibility? InterfaceDeclaration
+    | Visibility? ConstDeclaration
+    | ImplementsDeclaration
+    | term
+    ;
+
+Visibility = "pub" | "private" ;
+
+(* NOTE 10.3.1  Default visibility is private. `private` is accepted as an
+   explicit no-op so the specification's two-level model reads symmetrically.
+   `pub private` is an error.
+
+   NOTE 10.3.2  Visibility is not permitted on an ImplementsDeclaration.
+
+   NOTE 10.3.3  There is no top-level `let`. Module-level state must be
+   `const`; see decisions.md D-22. *)
+
+
+(* 10.4 Implements assertion *)
+
+ImplementsDeclaration =
+      "implements" identifier ":" TypePath ( "," TypePath )* ","? term ;
+
+(* NOTE 10.4.1  This is a compile-time assertion only. Conformance is
+   structural (12.4) and is not created by this declaration; the declaration
+   demands that it hold and produces a good error listing the missing or
+   mismatched methods if it does not.
+
+   NOTE 10.4.2  The subject must be a non-generic named type in 1.0.
+   `implements Box<T>: Printable` is deferred. *)
+
+
+(* ==========================================================================
+   11. TYPES
+   ========================================================================== *)
+
+Type = PrimaryType TypeSuffix* ;
+
+TypeSuffix = "?" | "!" ;
+
+PrimaryType =
+      TypePath TypeArguments?
+    | ArrayType
+    | MapType
+    | SetType
+    | TupleType
+    | FunctionType
+    | "(" Type ")"
+    ;
+
+TypePath      = identifier ( "." identifier )? ;
+TypeArguments = "<" Type ( "," Type )* ","? ">" ;
+
+ArrayType     = "[" Type "]" ;
+MapType       = "[" Type ":" Type "]" ;
+SetType       = "set" "<" Type ">" ;
+TupleType     = "(" Type ( "," Type )+ ","? ")" ;
+FunctionType  = "fn" "(" FunctionTypeParams? ")" ( ":" Type )? ;
+
+FunctionTypeParams =
+      Type ( "," Type )* ( "," "..." Type )? ","?
+    | "..." Type ","?
+    ;
+
+(* NOTE 11.1  ArrayType and MapType share a prefix. The parser reads `[`,
+   then a Type, then dispatches on `]` (array) or `:` (map).
+
+   NOTE 11.2  TypePath allows at most one dot: `Type` or `module.Type`.
+   Deeper paths do not exist, because an import binds exactly one identifier.
+
+   NOTE 11.3  `(Type)` is grouping. `(A, B)` is a 2-tuple. There is no
+   1-tuple: `(A,)` is an error. `()` is not a type; the absence of a value is
+   spelled `void`.
+
+   NOTE 11.4  A FunctionType carries types only - no parameter names, no
+   defaults. A value of function type is therefore always called
+   positionally. Named arguments need a statically known declaration (13.6).
+
+   NOTE 11.5  TypeSuffix applies left to right. `T?!` is "error of optional";
+   `T!?` is "optional of error". Both parse. `T??` and `T!!` parse and are
+   rejected by the checker with "optionals do not nest" and "error types do
+   not nest".
+
+   NOTE 11.6  `T!` MAY ONLY APPEAR AS A FUNCTION RETURN TYPE, or as the
+   return type inside a FunctionType. `let x: string!` is an error reading
+   "`!` may only be used on a function's return type; handle the error at the
+   call site with `!` or `catch`". This stops the failable type leaking into
+   the general type system; see decisions.md D-14.
+
+   NOTE 11.7  There is no `void` value. `void` may appear only as a return
+   type, where it is identical to omitting the return type. A failable
+   function that returns nothing is `fn f(): void!`.
+
+   NOTE 11.8  `set` is the only builtin generic type spelled with a keyword.
+   Arrays and maps have bracket syntax. A user generic type is
+   `Name<Args>`. *)
+
+
+(* ==========================================================================
+   12. DECLARATIONS
+   ========================================================================== *)
+
+(* 12.1 Functions *)
+
+FunctionDeclaration =
+      "fn" identifier GenericParameters? "(" ParameterList? ")"
+      ( ":" Type )? Block ;
+
+GenericParameters =
+      "<" GenericParameter ( "," GenericParameter )* ","? ">" ;
+GenericParameter  = identifier ( ":" TypeBound )? ;
+TypeBound         = TypePath ( "+" TypePath )* ;
+
+ParameterList = Parameter ( "," Parameter )* ","? ;
+Parameter =
+      identifier ":" Type ( "=" ConstantExpression )?   (* normal / default *)
+    | identifier ":" "..." Type                          (* variadic *)
+    ;
+
+(* NOTE 12.1.1  PARAMETER ORDER, enforced by the parser:
+     1. required parameters (no default)
+     2. defaulted parameters
+     3. at most one variadic parameter, which must be last
+   A required parameter after a defaulted one is an error. A variadic with a
+   default is an error. Two variadics is an error.
+
+   NOTE 12.1.2  A default value is a ConstantExpression (12.6), evaluated at
+   compile time. It may not reference another parameter.
+
+   NOTE 12.1.3  No return type means the function returns nothing; it is
+   identical to `: void`.
+
+   NOTE 12.1.4  There is no implicit return. A function with a non-void
+   return type must reach a `return`, a `fail`, or a diverging call on every
+   path. A trailing expression is not a return - per the specification, the
+   statement `a + b` is not even a legal statement (13.2).
+
+   NOTE 12.1.5  Nested named function declarations inside a Block are NOT
+   permitted in 1.0. Use `let f = fn(...) { ... }`.
+
+   NOTE 12.1.6  A generic parameter with no bound supports only binding,
+   passing, returning and storing. Calling a method on it is an error; add a
+   bound. See decisions.md D-21.
+
+   NOTE 12.1.7  ENTRY POINT. The root module must declare `fn main()`. It
+   takes no parameters. Its return type must be absent, `void`, `void!`,
+   `int`, or `int!`. It may not be generic. Visibility is irrelevant. *)
+
+
+(* 12.2 Structs *)
+
+StructDeclaration =
+      "struct" identifier GenericParameters? "{" StructMember* "}" ;
+
+StructMember =
+      Visibility? FieldDeclaration
+    | Visibility? MethodDeclaration
+    | term
+    ;
+
+FieldDeclaration  = identifier ":" Type term ;
+MethodDeclaration =
+      "fn" identifier GenericParameters? "(" ParameterList? ")"
+      ( ":" Type )? Block ;
+
+(* NOTE 12.2.1  FIELD VERSUS METHOD. A member beginning with the keyword `fn`
+   is a method. A member beginning with an identifier is a field. One token
+   of lookahead, no ambiguity. A field whose TYPE is a function is therefore
+   written `callback: fn(int): int` and is still unmistakably a field,
+   because it begins with the field name rather than with `fn`. See
+   decisions.md D-18.
+
+   NOTE 12.2.2  Fields have no default values in 1.0 and there is no zero
+   value. Every field must be supplied in every struct literal.
+
+   NOTE 12.2.3  Every method takes an implicit `this`. There are no static or
+   associated functions in 1.0; a constructor is a free function.
+
+   NOTE 12.2.4  Field names and method names share one namespace. A field and
+   a method with the same name is an error.
+
+   NOTE 12.2.5  Members are separated by `term` - a newline or a `;`. A comma
+   between struct members is an error.
+
+   NOTE 12.2.6  A struct with zero members is legal. *)
+
+
+(* 12.3 Enums *)
+
+EnumDeclaration =
+      "enum" identifier GenericParameters? "{" EnumMember* "}" ;
+
+EnumMember =
+      Visibility? VariantDeclaration
+    | Visibility? MethodDeclaration
+    | term
+    ;
+
+VariantDeclaration =
+      identifier ( "(" Type ( "," Type )* ","? ")" )? term ;
+
+(* NOTE 12.3.1  Variant payloads are positional and unnamed. A variant with
+   an empty payload list (`Red()`) is an error; write `Red`.
+
+   NOTE 12.3.2  Variants are as visible as their enum. A `Visibility?` on a
+   variant is redundant and must match the enum's; a mismatch is an error.
+
+   NOTE 12.3.3  Enums may carry methods, for symmetry with structs and so
+   that an enum can satisfy an interface. Inside an enum method `this` is the
+   enum value; there are no fields to resolve.
+
+   NOTE 12.3.4  Variants are referenced as `Enum.Variant`, never bare. See
+   decisions.md D-20.
+
+   NOTE 12.3.5  An enum with zero variants is an error.
+
+   NOTE 12.3.6  A variant's name may not duplicate another variant's name or
+   a method's name in the same enum. *)
+
+
+(* 12.4 Interfaces *)
+
+InterfaceDeclaration =
+      "interface" identifier GenericParameters? "{" InterfaceMember* "}" ;
+
+InterfaceMember =
+      InterfaceMethod
+    | term
+    ;
+
+InterfaceMethod =
+      "fn" identifier GenericParameters? "(" ParameterList? ")"
+      ( ":" Type )? term ;
+
+(* NOTE 12.4.1  Signatures only. A body is an error reading "interface
+   methods have no body in Pump 1.0".
+
+   NOTE 12.4.2  No fields in an interface. No embedded interfaces.
+
+   NOTE 12.4.3  Conformance is STRUCTURAL: a type conforms if it declares a
+   method of the same name whose signature matches in arity, parameter types
+   in order, and return type. Parameter NAMES and defaults are not part of
+   the match, which is why a method reached through an interface may not be
+   called with named arguments.
+
+   NOTE 12.4.4  An interface name is usable as a type. A value of interface
+   type is a fat pointer and dispatches dynamically.
+
+   NOTE 12.4.5  A default parameter value in an interface method signature is
+   an error. *)
+
+
+(* 12.5 Bindings *)
+
+LetDeclaration =
+      "let" IrrefutablePattern ( ":" Type )? "=" Expression term ;
+
+ConstDeclaration =
+      "const" IrrefutablePattern ( ":" Type )? "=" Expression term ;
+
+(* NOTE 12.5.1  An initialiser is ALWAYS required. There are no uninitialised
+   bindings and no definite-assignment analysis.
+
+   NOTE 12.5.2  `let` is reassignable, `const` is not. `const` binds the
+   value, not the interior: for a reference type, the fields of a `const`
+   binding remain assignable. See decisions.md D-24.
+
+   NOTE 12.5.3  A destructuring pattern is allowed, so `let (a, b) = point`
+   works. A type annotation with a destructuring pattern annotates the whole
+   right-hand side.
+
+   NOTE 12.5.4  At module level only `const` is allowed. Module consts are
+   initialised in dependency order before `main`; an initialisation cycle is
+   a compile error.
+
+   NOTE 12.5.5  Re-declaring a name already declared in the SAME block is an
+   error. Shadowing in a NESTED block is allowed. *)
+
+
+(* 12.6 Constant expressions *)
+
+ConstantExpression = Expression ;
+
+(* NOTE 12.6.1  A ConstantExpression is syntactically an ordinary Expression;
+   the restriction is semantic. It must be built only from:
+       - integer, float, char, bool and interpolation-free string literals,
+         and `null`
+       - references to module-level `const` bindings that are themselves
+         constant expressions
+       - unary `-` and `!`
+       - the binary arithmetic, bitwise, comparison and logical operators
+       - array, tuple, map and set literals whose elements are constant
+       - payload-free enum variants
+   Anything else - a call, a field access, `this`, a closure, a struct
+   literal, string interpolation - is an error at that node.
+
+   NOTE 12.6.2  Division or remainder by a zero constant is a compile error.
+
+   NOTE 12.6.3  Overflow in a constant expression is a compile error, not a
+   wrap. Runtime arithmetic wraps; see decisions.md D-6. *)
+
+
+(* ==========================================================================
+   13. STATEMENTS
+   ========================================================================== *)
+
+Block = "{" StatementList "}" ;
+
+StatementList = term? Statement* ;
+
+Statement =
+      LetDeclaration
+    | ConstDeclaration
+    | AssignmentStatement
+    | ExpressionStatement
+    | IfStatement
+    | WhileStatement
+    | ForStatement
+    | MatchStatement
+    | ReturnStatement
+    | FailStatement
+    | BreakStatement
+    | ContinueStatement
+    | Block
+    | term
+    ;
+
+(* NOTE 13.0.1  A statement that begins with `{` is ALWAYS a Block, never a
+   map literal. Map and set literals occur only in expression position, and a
+   statement position is not an expression position (13.2). This is the
+   second half of the resolution of the `{}` ambiguity; the first half is
+   "in expression position `{}` is always a map".
+
+   NOTE 13.0.2  A bare Block introduces a scope and is legal.
+
+   NOTE 13.0.3  STATEMENT DISPATCH is by first token, with one lookahead
+   needed only to separate an assignment from an expression statement: both
+   begin with an identifier or `this`, and the parser distinguishes them
+   after parsing the left-hand side (13.1.2). *)
+
+
+(* 13.1 Assignment *)
+
+AssignmentStatement = LValue AssignmentOperator Expression term ;
+
+AssignmentOperator = "=" | "+=" | "-=" | "*=" | "/=" | "%=" ;
+
+LValue =
+      identifier
+    | "this"
+    | LValue "." identifier
+    | LValue "[" Expression "]"
+    ;
+
+(* NOTE 13.1.1  ASSIGNMENT IS A STATEMENT, NOT AN EXPRESSION. `if a = b` does
+   not parse. There is no chained assignment `a = b = c`. See decisions.md
+   D-4.
+
+   NOTE 13.1.2  The parser parses a full PostfixExpression and then, on
+   seeing an AssignmentOperator, validates that what it parsed is an LValue.
+   This yields the good error "cannot assign to a call" instead of a parse
+   failure. A `?`, `!`, `::<...>`, or call anywhere in the chain disqualifies
+   it.
+
+   NOTE 13.1.3  `this` alone is not assignable. `this.f = v` is.
+
+   NOTE 13.1.4  There is no destructuring assignment; destructuring exists
+   only in `let`, `const`, `for` and `match`.
+
+   NOTE 13.1.5  The compound operators are exactly the six above. `&=`, `|=`,
+   `^=`, `<<=` and `>>=` do not exist in 1.0 (NOTE 4.5, decisions.md D-9).
+
+   NOTE 13.1.6  Assigning to a `const` binding, to a `for` binding, or to
+   `this` is an error. Assigning to a field or element reached through a
+   `const` binding is legal. *)
+
+
+(* 13.2 Expression statements *)
+
+ExpressionStatement = CallStatementExpression term ;
+
+CallStatementExpression =
+      PostfixExpression ( "catch" CatchTail )* ;
+
+(* NOTE 13.2.1  RESTRICTION: the PostfixExpression must contain at least one
+   call - its postfix chain must include a `(...)`, optionally followed by
+   `?`, `!`, further member accesses and further calls. Legal statements:
+       print(x)
+       user.greet()
+       read_file(p)!
+       load() catch { return }
+       items.map(f).filter(g)
+   Errors, each reading "this expression has no effect":
+       a + b
+       x
+       user.name
+   An expression statement that is not a call is dead code, and forbidding it
+   removes every case where a value-producing expression could be mistaken
+   for a statement. *)
+
+
+(* 13.3 Control flow *)
+
+IfStatement =
+      "if" Expression_ns Block ( "else" ( IfStatement | Block ) )? ;
+
+WhileStatement =
+      "while" Expression_ns Block ;
+
+ForStatement =
+      "for" IrrefutablePattern "in" Expression_ns Block ;
+
+(* NOTE 13.3.1  The condition of `if` and `while` must have type `bool`.
+   There is no truthiness: `if x` where x is an int, a string or an optional
+   is an error suggesting `!= 0`, `!= ""` or `!= null`.
+
+   NOTE 13.3.2  Parentheses around the condition are permitted - they are
+   just a grouped expression - and are not idiomatic.
+
+   NOTE 13.3.3  `if` is a STATEMENT. There is no `if` expression and no
+   ternary operator.
+
+   NOTE 13.3.4  `else if` is written exactly so; there is no `elif`.
+
+   NOTE 13.3.5  The `for` binding is a fresh immutable binding per iteration.
+   Assigning to it is an error, and a closure created in the body captures
+   that iteration's binding rather than a shared one.
+
+   NOTE 13.3.6  Iterables in 1.0 are: `[T]` yielding `T`, `[K: V]` yielding
+   `(K, V)`, `set<T>` yielding `T`, `string` yielding `char`, and a range
+   yielding `int`. User-defined iterables are deferred to 1.1.
+
+   NOTE 13.3.7  Map and set iteration order is INSERTION ORDER, guaranteed
+   and reproducible; see decisions.md D-26.
+
+   NOTE 13.3.8  Mutating a collection while iterating over it is a runtime
+   panic, detected by a modification counter. *)
+
+
+(* 13.4 Match *)
+
+MatchStatement =
+      "match" Expression_ns "{" MatchArms "}" ;
+
+MatchArms = term? MatchArm* ;
+
+MatchArm =
+      Pattern ( "if" Expression_ns )? "=>" ( Block | Statement ) ;
+
+(* NOTE 13.4.1  ARM SEPARATOR. An arm whose body is a Block ends with `}`,
+   which is in the closer set, so a `term` appears automatically. An arm
+   whose body is a Statement ends with its own `term`. A `,` is ALSO accepted
+   in place of that `term`, because a comma between arms is what most people
+   type. Formally: after an arm the parser accepts `,`, or a `term`, or `}`.
+   Both specification examples parse:
+       match value { 0 => print("zero")  1 => print("one")  _ => other() }
+       match color { Color.Red => { ... }  Color.Green => { ... } }
+
+   NOTE 13.4.2  `match` is a STATEMENT in 1.0, not an expression. Arm bodies
+   are statements. A match expression is deferred to 1.1, where it would need
+   a value-producing block, which Pump does not have.
+
+   NOTE 13.4.3  A guard is parsed in mode `ns` so the `{` of a block arm is
+   never eaten as a struct literal.
+
+   NOTE 13.4.4  EXHAUSTIVENESS. Every `match` must be exhaustive; a
+   non-exhaustive match is an error that names one uncovered pattern.
+     - `_` or a bare identifier binding makes any match exhaustive.
+     - `bool`: `true` and `false` suffice.
+     - An enum: exhaustive when every variant is covered by an arm whose
+       payload sub-patterns are themselves exhaustive for the payload types.
+     - `T?`: exhaustive when `null` and a pattern covering `T` are present.
+     - A tuple or struct pattern: exhaustive when every component is.
+     - `int`, `uint`, `float`, `char`, `string`: never exhaustive from
+       literals alone; a `_` or binding arm is required. Range patterns do
+       not make an integer match exhaustive - the analysis is not an interval
+       solver.
+     - A GUARDED arm never contributes to exhaustiveness, because the guard
+       cannot be evaluated statically.
+
+   NOTE 13.4.5  An arm that can never match because earlier arms already
+   cover it is an ERROR reading "unreachable match arm", computed by the same
+   usefulness algorithm as exhaustiveness. Guarded arms are exempt.
+
+   NOTE 13.4.6  Arms are tried in source order. *)
+
+
+(* 13.5 Jumps *)
+
+ReturnStatement   = "return" Expression? term ;
+FailStatement     = "fail" Expression term ;
+BreakStatement    = "break" term ;
+ContinueStatement = "continue" term ;
+
+(* NOTE 13.5.1  A returned expression must BEGIN ON THE SAME LINE as
+   `return`; see 8.4. The same holds for `fail` as a matter of style.
+
+   NOTE 13.5.2  `return` with no expression is legal only in a function whose
+   return type is `void` or absent. `return` with an expression is legal only
+   in a function with a non-void return type.
+
+   NOTE 13.5.3  `fail e` is legal only inside a function whose return type
+   carries `!`. `e` must conform to the builtin `Error` interface; `string`
+   conforms, so `fail "not found"` works. `fail` is the ONLY way to produce
+   the error case. See decisions.md D-15, which flags it as an addition
+   beyond the draft specification - the draft provides no way at all to
+   produce an error.
+
+   NOTE 13.5.4  `break` and `continue` take no label and no value in 1.0.
+   They must be lexically inside a `while` or `for` in the same function; a
+   closure body is a new function boundary and cannot break a loop that
+   encloses the closure. *)
+
+
+(* 13.6 Calls and arguments - semantic rules, recorded here for locality *)
+
+(* NOTE 13.6.1  ARGUMENT ORDER AT THE CALL SITE. All positional arguments
+   must precede all named arguments. A positional argument after a named one
+   is an error reading "positional arguments must come before named
+   arguments". Named arguments may appear in any order among themselves.
+
+   NOTE 13.6.2  BINDING ALGORITHM.
+     1. Positional arguments fill parameters left to right.
+     2. When the variadic parameter is reached, every remaining positional
+        argument is collected into it.
+     3. Named arguments then fill parameters that are still unfilled.
+     4. A named argument naming an already-filled parameter is an error
+        ("argument `p` supplied twice").
+     5. A named argument naming the variadic parameter is an error
+        ("a variadic parameter cannot be passed by name").
+     6. A named argument naming no parameter is an error.
+     7. Every remaining unfilled parameter must have a default; otherwise it
+        is an error naming the missing parameter.
+
+   NOTE 13.6.3  Named arguments require the callee's parameter names to be
+   statically known. They are therefore allowed only on a direct call to a
+   named function or method, never through a value of FunctionType and never
+   through an interface method.
+
+   NOTE 13.6.4  There is no argument spread (`f(...xs)`) in 1.0.
+
+   NOTE 13.6.5  Parameter names are part of a function's public API;
+   renaming one is a breaking change. *)
+
+
+(* ==========================================================================
+   14. EXPRESSIONS
+   ==========================================================================
+   The layered rules below encode the precedence table. precedence.md is the
+   human-readable version of exactly this shape; if the two ever disagree,
+   this section wins.
+   ========================================================================== *)
+
+Expression = CatchExpression ;
+
+CatchExpression =
+      RangeExpression ( "catch" CatchTail )* ;
+
+CatchTail =
+      Block                                (* discard the error *)
+    | identifier Block                     (* bind the error *)
+    | RangeExpression_ns                   (* value fallback *)
+    ;
+
+(* NOTE 14.1  DISPATCH AFTER `catch`, one or two tokens of lookahead:
+       next is `{`                     -> discard-block form
+       next is identifier then `{`     -> binding-block form
+       otherwise                       -> value form, parsed in mode `ns`
+   Because a `term` is inserted after an identifier at end of line (8.2) and
+   `{` is not in the elision set (8.3), a `{` on the FOLLOWING line is never
+   mistaken for the binder's block.
+
+   NOTE 14.2  After `catch`, a `{` always begins a handler block. To supply
+   an empty map as a fallback, parenthesise: `catch ({})`. To supply a struct
+   literal, parenthesise: `catch (Config { ... })`. This is mode `ns` (9.1),
+   applied for the same reason as in control-flow headers.
+
+   NOTE 14.3  BLOCK FORMS MUST DIVERGE. Every path through a handler block
+   must `return`, `fail`, `break`, `continue`, or call a diverging function
+   such as `panic`. A block that can fall through is an error reading "a
+   `catch` block must not fall through; use the value form
+   `expr catch <value>` to supply a fallback". This is what makes the
+   specification's own example type-check:
+       let data = read_file("data.txt") catch { return "" }
+   The value of the whole expression is the success value of the operand.
+
+   NOTE 14.4  A catch block MAY `return` from the ENCLOSING function, and may
+   `break` or `continue` an enclosing loop. This is explicitly allowed; the
+   draft specification's example depends on it.
+
+   NOTE 14.5  `catch` is left-associative: `a catch b catch c` is
+   `(a catch b) catch c`. The two groupings are semantically identical, so
+   the choice is arbitrary and left-associativity matches every other binary
+   form here.
+
+   NOTE 14.6  The operand of `catch` must be of a failable type - a call to a
+   function returning `T!`. Applying `catch` to a non-failable expression is
+   an error. Applying `catch` after `!` (`f()! catch {}`) is an error,
+   because `!` has already consumed the failure.
+
+   NOTE 14.7  In the binding form, the bound name has type `Error` and is
+   scoped to the handler block. *)
+
+
+RangeExpression =
+      OrExpression ( ( ".." | "..=" ) OrExpression )? ;
+
+(* NOTE 14.8  Non-associative: `a..b..c` is a parse error. Both endpoints are
+   required; `a..`, `..b` and `..` are not expressions in 1.0. Endpoints must
+   be `int`. *)
+
+OrExpression  = AndExpression ( "||" AndExpression )* ;
+AndExpression = ComparisonExpression ( "&&" ComparisonExpression )* ;
+
+(* NOTE 14.9  `&&` and `||` short-circuit. Both operands must be `bool`. *)
+
+ComparisonExpression =
+      BitOrExpression ( ComparisonOperator BitOrExpression )? ;
+ComparisonOperator = "==" | "!=" | "<" | ">" | "<=" | ">=" ;
+
+(* NOTE 14.10  NON-ASSOCIATIVE. `a < b < c` is a parse error reading
+   "comparison operators cannot be chained; use parentheses or `&&`". Besides
+   catching the classic bug, this removes the last doubt about `<`: inside an
+   expression `<` is always comparison and never a type bracket. *)
+
+BitOrExpression  = BitXorExpression ( "|" BitXorExpression )* ;
+BitXorExpression = BitAndExpression ( "^" BitAndExpression )* ;
+BitAndExpression = ShiftExpression  ( "&" ShiftExpression  )* ;
+ShiftExpression  = AdditiveExpression
+                   ( ( "<<" | ">>" ) AdditiveExpression )* ;
+AdditiveExpression =
+      MultiplicativeExpression ( ( "+" | "-" ) MultiplicativeExpression )* ;
+MultiplicativeExpression =
+      UnaryExpression ( ( "*" | "/" | "%" ) UnaryExpression )* ;
+
+(* NOTE 14.11  Bitwise operators bind TIGHTER than comparison, so
+   `a & b == c` is `(a & b) == c`, not C's `a & (b == c)`. *)
+
+UnaryExpression =
+      ( "!" | "-" ) UnaryExpression
+    | PostfixExpression
+    ;
+
+(* NOTE 14.12  There is no unary `+` and no unary `~`. `!` requires `bool`;
+   `-` requires `int` or `float`, never `uint`. *)
+
+PostfixExpression = PrimaryExpression PostfixOperator* ;
+
+PostfixOperator =
+      "." identifier                                 (* field or method *)
+    | "." tuple_index                                (* tuple element *)
+    | CallArguments                                  (* call *)
+    | "[" Expression "]"                             (* index *)
+    | "?"                                            (* null propagation *)
+    | "!"                                            (* error propagation *)
+    | "::" "<" Type ( "," Type )* ","? ">"           (* turbofish *)
+    | StructLiteralBody                              (* struct literal *)
+    ;
+
+tuple_index = dec_digit+ ;                           (* see NOTE 9.6 *)
+
+CallArguments = "(" ( Argument ( "," Argument )* ","? )? ")" ;
+Argument =
+      identifier ":" Expression      (* named - see NOTE 9.5 *)
+    | Expression                     (* positional *)
+    ;
+
+StructLiteralBody =
+      "{" ( FieldInit ( FieldSeparator FieldInit )* FieldSeparator? )? "}" ;
+FieldInit      = identifier ":" Expression ;
+FieldSeparator = "," | term ;
+
+(* NOTE 14.13  StructLiteralBody is legal as a postfix operator ONLY when
+     (a) mode `ns` is not active, AND
+     (b) everything parsed so far is a PATH: an identifier, or
+         `identifier "." identifier` (module-qualified), each optionally
+         followed by one turbofish.
+   Legal:      User { ... }    models.User { ... }    Box::<int> { ... }
+   Not a struct literal: `f() { ... }`, `a[0] { ... }`, `this { ... }` - in
+   those positions the `{` ends the expression.
+
+   NOTE 14.14  FIELD SEPARATOR. Fields are separated by `,` OR by a `term`.
+   Since a struct literal's braces are a `{`, insertion is active inside them
+   (8.1), so the specification's comma-free multi-line form works:
+       let user = User {
+           name: "Minh"
+           age: 18
+       }
+   THE SINGLE-LINE FORM REQUIRES COMMAS, because there are no newlines from
+   which to insert terminators:
+       let user = User { name: "Minh", age: 18 }
+   Mixing the two is legal but a style error. A trailing separator is
+   allowed.
+
+   NOTE 14.15  Every field of the struct must be initialised exactly once.
+   There is no field shorthand (`User { name }`) and no functional-update
+   syntax (`User { ..base }`) in 1.0.
+
+   NOTE 14.16  TURBOFISH. Explicit type arguments in an EXPRESSION are
+   written `expr::<T, U>`, never `expr<T, U>`. This resolves the
+   `first<int>(items)` versus `a < b > (c)` collision: inside an expression,
+   `<` is ALWAYS comparison. Declarations (`fn first<T>`, `struct Box<T>`)
+   and type positions (`Box<int>`) keep plain angle brackets, where no
+   collision exists. Type arguments are inferred by default; turbofish is
+   needed only when inference has nothing to work from, e.g. `zero::<int>()`.
+
+   NOTE 14.17  POSTFIX CHAIN ORDER. Postfix operators apply strictly left to
+   right, all at the same, tightest, precedence:
+       user?.name   is  ((user)?).name
+       f()!.g()     is  ((f())!).g()
+       a[0]?.b!     is  (((a[0])?).b)!
+   `user?.name` therefore reads like optional chaining and behaves like
+   propagation, which is the intent. There is no `?.` token. *)
+
+
+PrimaryExpression =
+      integer_literal
+    | float_literal
+    | char_literal
+    | StringLiteral
+    | "true" | "false" | "null"
+    | "this"
+    | identifier
+    | ArrayLiteral
+    | MapLiteral
+    | SetLiteral
+    | TupleOrGrouped
+    | ClosureExpression
+    ;
+
+ArrayLiteral =
+      "[" ( Expression ( "," Expression )* ","? )? "]" ;
+
+MapLiteral =
+      "{" ( MapEntry ( FieldSeparator MapEntry )* FieldSeparator? )? "}" ;
+MapEntry = Expression ":" Expression ;
+
+SetLiteral =
+      "set" "{" ( Expression ( FieldSeparator Expression )* FieldSeparator? )?
+      "}" ;
+
+TupleOrGrouped =
+      "(" Expression ")"                                     (* grouping *)
+    | "(" Expression ( "," Expression )+ ","? ")"            (* tuple *)
+    ;
+
+ClosureExpression =
+      "fn" "(" ParameterList? ")" ( ":" Type )? Block ;
+
+(* NOTE 14.18  `{}` IN EXPRESSION POSITION IS ALWAYS AN EMPTY MAP. A set is
+   `set{}`. A block exists only in statement position (13.0.1), so the three
+   never compete. Both specification lines parse:
+       let ids: set<int> = set{}
+       let users: [string: User] = {}
+
+   NOTE 14.19  ArrayLiteral elements are separated by `,` only, not by a
+   newline, because insertion is suppressed inside `[` (8.1). A multi-line
+   array therefore needs commas. Struct, map and set literals use `{`, where
+   insertion is active, so they accept either. The asymmetry falls out of one
+   bracket rule rather than being a special case, and the comma-free form is
+   required only for struct literals, which the specification mandates.
+
+   NOTE 14.20  `(e)` is grouping; `(a, b)` is a 2-tuple. `(a,)` is an error
+   reading "Pump has no 1-tuples". `()` is an error.
+
+   NOTE 14.21  A ClosureExpression requires explicit parameter types, and an
+   explicit return type when it returns a value. Parameter inference for
+   closures is deferred. The `(a, b) => a + b` shorthand is deliberately NOT
+   in 1.0 - the draft specification argues against it, and `=>` is reserved
+   for match arms.
+
+   NOTE 14.22  A closure captures BINDINGS, not values. A captured `let`
+   stays mutable through the closure and every copy of the closure observes
+   the same binding. Captured locals are boxed and kept alive by the GC. A
+   closure inside a method may capture `this`.
+
+   NOTE 14.23  An anonymous function cannot refer to the binding it is being
+   assigned to: `let f = fn() { f() }` is an error reading "`f` is not yet
+   initialised". Recursion requires a named top-level function.
+
+   NOTE 14.24  A MapLiteral's keys are ordinary expressions, so
+   `{ name: "x" }` is a map keyed by the VALUE of the variable `name`, not a
+   struct literal with a forgotten type name. This is the accepted cost of
+   `{}` meaning map.
+
+   NOTE 14.25  A map literal key expression may not itself begin with `{`;
+   parenthesise. This keeps the entry-versus-element decision to one token. *)
+
+
+(* Path form referenced by NOTE 9.1 and NOTE 14.13 *)
+
+PathExpression =
+      identifier ( "::" "<" Type ( "," Type )* ","? ">" )?
+    | identifier "." identifier ( "::" "<" Type ( "," Type )* ","? ">" )?
+    ;
+
+
+(* ==========================================================================
+   15. PATTERNS
+   ========================================================================== *)
+
+Pattern = OrPattern ;
+
+OrPattern = PrimaryPattern ( "|" PrimaryPattern )* ;
+
+PrimaryPattern =
+      underscore                                       (* wildcard *)
+    | "null"
+    | "true" | "false"
+    | LiteralPattern
+    | RangePattern
+    | identifier                                       (* binding *)
+    | VariantPattern
+    | StructPattern
+    | TuplePattern
+    ;
+
+LiteralPattern =
+      "-"? integer_literal
+    | char_literal
+    | StringLiteralNoInterp
+    ;
+
+RangePattern =
+      ( "-"? integer_literal | char_literal )
+      ( ".." | "..=" )
+      ( "-"? integer_literal | char_literal )
+    ;
+
+VariantPattern =
+      identifier "." identifier ( "(" PatternList? ")" )? ;
+
+StructPattern =
+      identifier "{" FieldPatternList? "}" ;
+
+FieldPatternList =
+      FieldPattern ( FieldSeparator FieldPattern )*
+      ( FieldSeparator ".." )? FieldSeparator?
+    | ".." FieldSeparator?
+    ;
+
+FieldPattern = identifier ":" Pattern | identifier ;
+
+TuplePattern =
+      "(" Pattern ( "," Pattern )+ ","? ")" ;
+
+PatternList = Pattern ( "," Pattern )* ","? ;
+
+IrrefutablePattern =
+      identifier
+    | underscore
+    | "(" IrrefutablePattern ( "," IrrefutablePattern )+ ","? ")"
+    ;
+
+(* NOTE 15.1  A BARE IDENTIFIER IN A PATTERN IS ALWAYS A NEW BINDING. It is
+   never a reference to a constant and never a reference to an enum variant.
+   Enum variants must be qualified (`Color.Red`), which is why VariantPattern
+   requires the dot. This deliberately removes the well-known trap where
+   misspelling a variant silently produces a catch-all binding.
+
+   NOTE 15.2  There are NO float literal patterns. `match x { 1.5 => ... }`
+   is an error reading "floating-point values cannot be matched; use a
+   comparison". Equality on floats is not a sound basis for dispatch.
+
+   NOTE 15.3  StringLiteralNoInterp is a StringLiteral containing no
+   interpolation. A pattern containing `{expr}` is an error.
+
+   NOTE 15.4  RangePattern endpoints must be literals of the same kind,
+   integer or char, and the low endpoint must not exceed the high one. Range
+   patterns do not contribute to exhaustiveness (NOTE 13.4.4).
+
+   NOTE 15.5  OR-PATTERNS. Every alternative of an OrPattern must bind
+   exactly the same set of names with the same types. `Ok(x) | Err(x)` is
+   legal when both payloads have the same type; `Ok(x) | Err(y)` is an error.
+   `|` binds looser than every other pattern form.
+
+   NOTE 15.6  StructPattern uses `..` to mean "and I do not care about the
+   remaining fields". Without a `..`, every field must be listed. The
+   shorthand `FieldPattern = identifier` binds a variable of the field's name
+   to the field's value. That shorthand exists for patterns even though
+   struct LITERALS have none, because in a pattern the name being introduced
+   is the whole point.
+
+   NOTE 15.7  A pattern may bind a given name at most once; `(x, x)` is an
+   error.
+
+   NOTE 15.8  IrrefutablePattern is the subset usable in `let`, `const` and
+   `for`. It cannot fail to match. Struct destructuring in `let` is
+   deliberately excluded from 1.0 to keep the irrefutability check trivial;
+   use field access.
+
+   NOTE 15.9  In a StructPattern the parser is not in mode `ns`, because a
+   pattern position is not an expression position; `match x { User { .. } =>
+   ... }` needs no parentheses. *)
+
+
+(* ==========================================================================
+   16. NAME RESOLUTION
+   ==========================================================================
+
+   NOTE 16.1  RESOLUTION ORDER. An unqualified identifier in expression
+   position is resolved by walking these scopes in order and stopping at the
+   first match:
+
+     1. Local bindings of the innermost enclosing block, then each enclosing
+        block outward within the current function or closure. Within a block
+        a binding is visible only AFTER its declaration.
+     2. Parameters of the innermost enclosing function or closure.
+     3. For each enclosing closure, innermost first: repeat 1 and 2 in that
+        closure's scope. This is lexical capture.
+     4. If the innermost enclosing function is a METHOD, or a closure
+        lexically inside a method: the fields and methods of `this`.
+     5. Module-level declarations of the current file - consts, functions,
+        structs, enums, interfaces - regardless of order in the file.
+     6. Module aliases bound by `import`.
+     7. Predeclared identifiers (2.5).
+
+   NOTE 16.2  `this.name` skips steps 1 to 3 and resolves directly at step 4.
+   It is how the specification's example disambiguates a parameter from a
+   field:
+        fn rename(name: string) { this.name = name }
+   `name` on the right resolves at step 2 to the parameter; `this.name` on
+   the left is unambiguously the field.
+
+   NOTE 16.3  Reads and writes resolve IDENTICALLY. If `age` resolves to a
+   field at step 4, then `age = 19` inside a method assigns the field, just
+   as `print(age)` reads it. Requiring `this.` for writes but not for reads
+   would be a silent asymmetry; the shadowing rules already provide the
+   disambiguation. A style tool may still prefer explicit `this.`.
+
+   NOTE 16.4  Methods resolve exactly as fields do. Inside a method,
+   `greet()` means `this.greet()` when no local, parameter or capture named
+   `greet` is in scope.
+
+   NOTE 16.5  `this` is a keyword, bound only inside a method body and inside
+   closures lexically within one. It is immutable: `this = x` is an error,
+   `this.f = x` is not.
+
+   NOTE 16.6  SHADOWING.
+     - Two declarations of the same name in the SAME block: error.
+     - A declaration shadowing an outer block, a parameter, a field, or a
+       module-level name: allowed.
+     - A declaration shadowing a non-shadowable predeclared name (2.5):
+       error.
+     - A parameter shadowing a field: allowed, and is the specification's own
+       example.
+
+   NOTE 16.7  QUALIFIED NAMES. `a.b` is resolved by first resolving `a`. If
+   `a` is a module alias, `b` is a member of that module and must be `pub`.
+   If `a` is a type name, `b` is an enum variant - types have no other
+   members in 1.0. Otherwise `a` is a value and `b` is a field, a method, or
+   the builtin pseudo-field `length`.
+
+   NOTE 16.8  Type names resolve in a SEPARATE NAMESPACE from value names,
+   walked as: generic parameters of the enclosing declaration, then
+   module-level type declarations, then module aliases, then predeclared
+   types. A local variable named `x` never interferes with a type named `x`.
+
+   NOTE 16.9  An unused local is a warning; an unused import is an error. `_`
+   never warns.
+
+   NOTE 16.10  NULL NARROWING, required by the specification's own
+   `if user != null { print(user.name) }`. Within a region guarded by a
+   comparison of a SIMPLE LOCAL IDENTIFIER against `null`, that identifier's
+   type narrows from `T?` to `T`:
+     - `if x != null { A } else { B }` narrows x in A.
+     - `if x == null { A } else { B }` narrows x in B, and - when A always
+       diverges - in every statement after the `if`.
+     - `&&` chains narrow left to right within the condition and into the
+       then-branch. `||` does not narrow.
+     - A leading `!` inverts the narrowing.
+   Narrowing is DEFEATED for the whole enclosing function if the identifier
+   is assigned anywhere inside the narrowed region, or is captured by any
+   closure that assigns it. Narrowing applies to simple identifiers ONLY, not
+   to field paths: for `a.b`, bind a local first. See decisions.md D-25.
+   ========================================================================== *)
+
+
+(* ==========================================================================
+   17. PINNED SEMANTICS THE GRAMMAR DEPENDS ON
+   ==========================================================================
+   Full rationale is in decisions.md; the values are recorded here so this
+   file stands alone.
+
+   int      signed 64-bit, two's complement
+   uint     unsigned 64-bit
+   float    IEEE-754 binary64
+   bool     one byte; values `true` and `false`; no truthiness, no coercion
+   char     a Unicode scalar value, 32-bit: 0..0x10FFFF minus 0xD800..0xDFFF
+   string   immutable, UTF-8, always valid; `.length` is a BYTE count; not
+            indexable with `[]`; iterating yields `char`
+   void     the absence of a value; usable only as a return type
+
+   Overflow on `+ - * <<` wraps two's-complement, identically in debug and
+   release builds. Checked variants live in the stdlib.
+   Integer `/` and `%` by zero panic. `%` takes the sign of the dividend.
+   `>>` is arithmetic on `int` and logical on `uint`. A shift count at or
+   above the width yields 0, or -1 for a negative `int >>`; a negative shift
+   count panics.
+   THERE ARE NO IMPLICIT NUMERIC CONVERSIONS in either direction, `int` to
+   `float` included. Use `int(x)`, `uint(x)`, `float(x)`.
+   `float` may not be a map key or a set element.
+   ========================================================================== *)
