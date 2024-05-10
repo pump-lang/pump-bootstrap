@@ -20,3 +20,15 @@ impl FileId {
         self.0 as usize
     }
 }
+
+/// Byte range [start, end) in one file, plus line and column of start so
+/// the error printer does not have to count again.
+/// column is counted in BYTES, khong phai ky tu.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Span {
+    pub file: FileId,
+    pub start: u32,
+    pub end: u32,
+    pub line: u32,
+    pub column: u32,
+}
