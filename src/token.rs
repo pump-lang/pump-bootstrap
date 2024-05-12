@@ -32,3 +32,65 @@ pub struct Span {
     pub line: u32,
     pub column: u32,
 }
+
+impl Span {
+    pub fn new(file: FileId, start: u32, end: u32, line: u32, column: u32) -> Span {
+        Span {
+            file,
+            start,
+            end,
+            line,
+            column,
+        }
+    }
+
+    /// A span pointing at nothing. Dung cho node compiler tu che ra.
+    pub fn synthetic() -> Span {
+        Span {
+            file: FileId::SYNTHETIC,
+            start: 0,
+            end: 0,
+            line: 1,
+            column: 1,
+        }
+    }
+
+    pub fn is_synthetic(self) -> bool {
+        self.file == FileId::SYNTHETIC
+    }
+
+    /// Smallest span that covers both.
+    pub fn to(self, other: Span) -> Span {
+        Span {
+            file: self.file,
+            start: self.start.min(other.start),
+            end: self.end.max(other.end),
+            line: self.line,
+            column: self.column,
+        }
+    }
+
+    /// Zero width span at the start, for "expected X here".
+    pub fn start_point(self) -> Span {
+        Span {
+            end: self.start,
+            ..self
+        }
+    }
+
+    pub fn len(self) -> u32 {
+        self.end.saturating_sub(self.start)
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// One token: kind, span, and the value if it has one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Token {
+    pub kind: TokenKind,
+    pub span: Span,
+    pub value: TokenValue,
+}

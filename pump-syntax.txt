@@ -1,0 +1,91 @@
+Pump Language Specification v0.1 - bản nháp.
+
+Ghi lại để khỏi quên. Ưu tiên: cú pháp dễ đọc, explicit, grammar nhỏ, compiler parse
+nhanh. Không bê nguyên Rust/Go/Python vào.
+
+## Pump
+
+Triết lý cú pháp:
+
+> **simple syntax, explicit behavior, fast compilation**
+
+Pump có runtime GC, nhưng GC hoàn toàn nằm ngoài syntax.
+
+### 1. Chương trình
+
+Một file Pump:
+
+```pump
+import io
+
+const VERSION: string = "0.1"
+
+fn main() {
+    let name: string = "Minh"
+    io.println("Hello " + name)
+
+    return
+}
+```
+
+Không bắt buộc `;`.
+
+Statement được kết thúc bởi newline hoặc `}`.
+
+Nếu cần nhiều statement trên một dòng:
+
+```pump
+let a = 10; let b = 20
+```
+
+Nhưng style chuẩn vẫn là mỗi statement một dòng.
+
+---
+
+## 2. Binding
+
+Chỉ có **hai keyword**:
+
+```pump
+let
+const
+```
+
+`let` khả biến:
+
+```pump
+let count = 0
+count = 10
+count += 1
+```
+
+`const` bất biến:
+
+```pump
+const name = "Pump"
+```
+
+Không thể:
+
+```pump
+const x = 10
+x = 20
+```
+
+Compiler báo lỗi.
+
+Type annotation:
+
+```pump
+let age: int = 18
+const name: string = "Minh"
+```
+
+Inference:
+
+```pump
+let age = 18
+const name = "Minh"
+```
+
+---
