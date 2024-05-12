@@ -89,3 +89,115 @@ const name = "Minh"
 ```
 
 ---
+
+## 3. Primitive types
+
+Pump core có:
+
+```text
+bool
+int
+uint
+float
+char
+string
+```
+
+Literal:
+
+```pump
+true
+false
+
+42
+-42
+3.14
+
+'a'
+"hello"
+```
+
+String hỗ trợ interpolation:
+
+```pump
+let name = "Minh"
+let age = 18
+
+print("Tên: {name}, tuổi: {age}")
+```
+
+---
+
+## 4. Collection
+
+Array:
+
+```pump
+let numbers: [int] = [1, 2, 3, 4]
+```
+
+Map:
+
+```pump
+let users: [string: User] = {}
+```
+
+Set:
+
+```pump
+let ids: set<int> = {}
+```
+
+Tuple:
+
+```pump
+let point: (int, int) = (10, 20)
+```
+
+Index:
+
+```pump
+let first = numbers[0]
+```
+
+---
+
+## 5. Function
+
+Function dùng `fn`.
+
+```pump
+fn add(a: int, b: int): int {
+    return a + b
+}
+```
+
+Không return:
+
+```pump
+fn hello(name: string) {
+    print("Hello " + name)
+}
+```
+
+Return luôn explicit:
+
+```pump
+fn max(a: int, b: int): int {
+    if a > b {
+        return a
+    }
+
+    return b
+}
+```
+
+Không có chuyện:
+
+```pump
+a + b
+```
+
+tự động trở thành return như Rust.
+
+---
