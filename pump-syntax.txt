@@ -201,3 +201,124 @@ a + b
 tự động trở thành return như Rust.
 
 ---
+
+## 6. Parameters
+
+Normal:
+
+```pump
+fn greet(name: string) {
+    print(name)
+}
+```
+
+Default:
+
+```pump
+fn connect(host: string, port: int = 80) {
+    ...
+}
+```
+
+Named arguments:
+
+```pump
+connect( host: "localhost", port: 8080 )
+```
+
+Variadic:
+
+```pump
+fn sum(values: ...int): int {
+    ...
+}
+```
+
+---
+
+## 7. If
+
+```pump
+if age >= 18 {
+    print("adult")
+} else {
+    print("minor")
+}
+```
+
+Else-if:
+
+```pump
+if score >= 9 {
+    print("A")
+} else if score >= 80 {
+    print("B")
+} else {
+    print("C")
+}
+```
+
+Không dùng `elif`.
+
+---
+
+## 8. While
+
+```pump
+let i = 0
+
+while i < 10 {
+    print(i)
+    i += 1
+}
+```
+
+---
+
+## 9. For
+
+Pump dùng `for ... in`.
+
+```pump
+for item in items {
+    print(item)
+}
+```
+
+Range:
+
+```pump
+for i in 0..10 {
+    print(i)
+}
+```
+
+`0..10` là từ 0 đến 9.
+
+Inclusive:
+
+```pump
+for i in 0..=10 {
+    print(i)
+}
+```
+
+---
+
+## 10. Break / continue
+
+```pump
+for item in items {
+    if item == 0 {
+        continue
+    }
+
+    if item < 0 {
+        break
+    }
+
+    print(item)
+}
+```
+
+---
