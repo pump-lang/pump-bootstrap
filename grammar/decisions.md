@@ -242,7 +242,7 @@ Grammar: 13.1, NOTE 13.1.2.
 whose postfix chain contains at least one call, optionally followed by `?`,
 `!`, further member access, further calls, and `catch` clauses.
 
-Legal: `print(x)`, `user.greet()`, `do_file(p)!`,
+Legal: `print(x)`, `user.greet()`, `read_file(p)!`,
 `load() catch { return }`, `items.map(f).filter(g)`.
 
 Errors, each reading "this expression has no effect": `a + b`, `x`,
@@ -492,7 +492,7 @@ error: `!` may only be used on a function's return type
 ```
 
 A value of a failable type must be consumed immediately by postfix `!` or by
-`catch`. `let x = do_file(p)` where `do_file` returns `string!` is an error
+`catch`. `let x = read_file(p)` where `read_file` returns `string!` is an error
 reading "unhandled error; use `!` or `catch`".
 
 **Why.** This is the whole point of the spec's line "the goal is explicit error
@@ -519,7 +519,7 @@ operand must conform to the builtin `Error` interface; `string` conforms, so
 `fail "not found"` works.
 
 ```pump
-fn do_file(path: string): string! {
+fn read_file(path: string): string! {
     if !exists(path) {
         fail IoError { path: path }
     }
