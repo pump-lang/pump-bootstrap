@@ -322,3 +322,91 @@ for item in items {
 ```
 
 ---
+
+## 11. Struct
+
+```pump
+struct User {
+    name: string
+    age: int
+}
+```
+
+Khởi tạo:
+
+```pump
+let user = User {
+    name: "Minh"
+    age: 18
+}
+```
+
+Field:
+
+```pump
+print(user.name)
+
+user.age = 19
+```
+
+---
+
+## 12. Methods
+
+Method nằm trực tiếp trong struct:
+
+```pump
+struct User {
+    name: string
+    age: int
+
+    fn greet() {
+        print("Hello " + name)
+    }
+}
+```
+
+Gọi:
+
+```pump
+user.greet()
+```
+
+Không cần `self`.
+
+Trong method, field của object hiện tại được resolve trực tiếp.
+
+Nếu cần explicit receiver:
+
+```pump
+fn rename(name: string) {
+    this.name = name
+}
+```
+
+Pump dùng `this`, không dùng `self`.
+
+---
+
+## 13. Enum
+
+Simple enum:
+
+```pump
+enum Color {
+    Red
+    Green
+    Blue
+}
+```
+
+Payload:
+
+```pump
+enum Result<T, E> {
+    Ok(T)
+    Err(E)
+}
+```
+
+---
