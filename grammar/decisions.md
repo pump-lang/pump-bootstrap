@@ -542,3 +542,520 @@ of a `return` depend on type inference. Wrapper functions (`return err(e)` /
 `throw` carries exception baggage Pump explicitly does not want. `fail` is one
 keyword, reads as prose, is perfectly symmetric with `return`, and is
 unambiguous with zero lookahead.
+
+### D-16. Import paths use a backslash - FLAGGED FOR THE OWNER
+
+**Decision.** Kept exactly as the spec writes it: `import net\http`. The `\`
+is a token that the scanner emits **only** while scanning a module path - that
+is, immediately after `import`, or immediately after an identifier that itself
+followed `import` or `\`. Everywhere else outside a string or a comment, `\` is
+a lexical error reading:
+
+```
+error: unexpected `\`
+  note: the backslash is only valid inside a string literal and in an import path
+```
+
+A module path must lie entirely on one line; whitespace around `\` is accepted
+by the scanner but is a style error. Without `as`, the import binds the **last
+segment**: `import net\http` binds `http`.
+
+**This works, but it is unusual and this document is flagging it clearly.**
+
+The scanner has no real difficulty: `\` never appears in Pump outside a string
+literal, and string literals are scanned by their own routine, so a
+context-restricted `\` token creates no ambiguity. The problems are human, not
+mechanical:
+
+1. **It reads badly outside Windows.** To anyone coming from Unix, `net\http`
+   looks like a path with a typo, or like an escape sequence that lost its
+   letter.
+2. **It collides visually with the escape character.** Pump's own strings use
+   `\n`, `\t`, `\\`. A reader scanning a file sees `\` mean two unrelated
+   things.
+3. **It does not survive being pasted into a string.** `"import net\http"` is
+   a broken escape. Documentation, error messages, code generators and test
+   fixtures all have to double it.
+4. **It is hostile to search and to shells.** Grepping for `net\http` needs
+   escaping; so does putting it in most build files.
+
+**Alternatives, in the order I would recommend them:**
+
+- **`.` - `import net.http`.** Best fit. Member access on the module is already
+  `http.get(...)`, so one separator would mean "reach into a namespace"
+  everywhere. Java, Python, C# and Kotlin all do this and it needs no
+  explanation. Costs nothing in the grammar: a module path becomes
+  `identifier ("." identifier)*`, which is unambiguous because it appears only
+  after `import`.
+- **`/` - `import net/http`.** Second best. Matches the on-disk layout
+  literally and matches Go's import strings. `/` is also the division
+  operator, but a module path only ever appears directly after `import`, so
+  there is no ambiguity in practice.
+
+**Changing this is the owner's call, not mine, so the backslash stays.** If it
+does change, the grammar edit is one production (`ModulePath`) plus deleting
+NOTE 10.2.2; nothing else in the language depends on it.
+
+### D-17. `catch` has three forms; block handlers must diverge
+
+**Decision.** Three forms, and no others:
+
+```pump
+expr catch { ... }          // discard the error
+expr catch e { ... }        // bind the error as `e`, of type Error
+expr catch <expression>     // value fallback
+```
+
+Parser dispatch after `catch`, one or two tokens of lookahead:
+
+- next token is `{` -> discard-block form
+- next tokens are `identifier` then `{` -> binding form
+- otherwise -> value form, parsed in mode `ns`
+
+**Binding.** Yes, `catch e { ... }` binds. The bound name has type `Error` and
+is scoped to the handler block. A handler that cannot see the error can only
+ever produce a generic message, which makes the whole error channel useless in
+practice.
+
+**Divergence.** Every path through a **block** handler must `return`, `fail`,
+`break`, `continue`, or call a diverging function such as `panic`. A block that
+can fall through is an error:
+
+```
+error: a `catch` block must not fall through
+  help: use the value form `expr catch <value>` to supply a fallback
+```
+
+This is what makes the spec's own example type-check, since Pump has no
+value-producing blocks:
+
+```pump
+let data = read_file("data.txt") catch {
+    return ""
+}
+```
+
+**Can the catch block `return` from the enclosing function? Yes - explicitly.**
+It may also `break` or `continue` an enclosing loop. The spec's example depends
+on it, and forbidding it would leave the block form with nothing it could do.
+
+**Precedence and associativity.** `catch` is the loosest expression form
+(level 13) and is left-associative. Loosest because `f(a) catch 0` must bind
+the `catch` to the call, not to `a`. Left-associative arbitrarily -
+`a catch b catch c` means the same thing either way.
+
+**Mode `ns` after `catch`.** A `{` after `catch` always begins a handler block.
+To supply a map or a struct literal as a fallback, parenthesise:
+`catch ({})`, `catch (Config { ... })`. Without this, `f() catch {}` would be
+ambiguous between "empty handler" and "default to an empty map". This is P-3
+applied to the same problem in the same way.
+
+**Type rules.** The operand must be failable. `catch` on a non-failable
+expression is an error, and `f()! catch {}` is an error because `!` has already
+consumed the failure.
+
+**Rejected.** `catch |e| { }` (closure syntax for something that is not a
+closure). `catch e => expr` (a fourth form, and `=>` belongs to `match`).
+Making the value form able to see the error - `catch e <expr>` is ambiguous
+with the value form when the expression *is* an identifier, and the block form
+already covers it.
+
+### D-18. Field versus method in a struct body: the first token decides
+
+**Decision.** A struct or enum member that begins with the keyword `fn` is a
+**method**. A member that begins with an identifier is a **field**. One token
+of lookahead.
+
+A field whose *type* is a function is therefore written with the field name
+first and is never confusable with a method:
+
+```pump
+struct Handler {
+    name: string
+    callback: fn(int): int        // a field, of function type
+    fallback: fn(string): string? // also a field
+
+    fn run(x: int): int {         // a method
+        return callback(x)
+    }
+}
+```
+
+Function *types* carry types only - no parameter names, no defaults, no named
+arguments (grammar NOTE 11.4). That is a second, independent reason the two
+forms cannot be confused: `fn(int): int` has no identifier where a method has
+its name.
+
+**Why.** The spec puts methods directly inside the struct body, which is the
+right call for readability, but it never says how a `callback: fn()` field is
+distinguished. Keying on the first token makes it trivial and needs no
+keyword like `field` or `method`.
+
+Field names and method names share one namespace; a collision is an error.
+
+### D-19. Struct literal separators: newline or comma, both accepted
+
+**Decision.** Struct literal fields - and map entries, and set elements - are
+separated by **`,` or a terminator (newline)**, interchangeably. A trailing
+separator is allowed.
+
+The spec's comma-free multi-line form works unchanged:
+
+```pump
+let user = User {
+    name: "Minh"
+    age: 18
+}
+```
+
+**The single-line form requires commas**, because there is no newline to insert
+a terminator from:
+
+```pump
+let user = User { name: "Minh", age: 18 }
+```
+
+Mixing the two in one literal parses, but is a style error.
+
+**Why.** This is not a special case - it falls straight out of D-2. Insertion
+is active inside `{`, so newlines inside a struct literal become terminators;
+insertion is suppressed inside `[`, so array elements always need commas:
+
+```pump
+let a = [ 1, 2, ]
+```
+
+The array/struct asymmetry is a consequence of one bracket rule, and the
+comma-free form is only *required* for struct literals, which is what the spec
+mandates.
+
+Every field must be initialised exactly once. There is no field shorthand
+(`User { name }`) and no functional update (`User { ..base }`) in 1.0 - both
+are additive later. Struct fields have no default values and there is no zero
+value (grammar NOTE 12.2.2).
+
+### D-20. Enum variants must be qualified; a bare identifier in a pattern is a binding
+
+**Decision.** Enum variants are always written `Enum.Variant`, in expressions
+and in patterns alike. Correspondingly, **a bare identifier in a pattern is
+always a new binding** - never a reference to a constant, never a reference to
+a variant.
+
+**Why.** This closes the best-known trap in ML-family pattern matching, where
+misspelling a variant name silently produces an irrefutable catch-all binding
+and the compiler says nothing. Requiring the qualifier means a misspelling
+cannot even look like a variant; `Color.Rd` is an unknown-variant error at the
+exact token.
+
+The cost is verbosity in a `match` over a long enum name. It is worth it.
+
+**Rejected.** A leading-dot shorthand (`.Red`) when the scrutinee type is
+known - it needs type information during parsing, and mixing the two spellings
+just moves the confusion.
+
+---
+
+## Part 6 - Types, generics, interfaces
+
+### D-21. Generic parameters take interface bounds
+
+**Decision.** `<T>` and `<T: Printable>` and `<T: Printable + Comparable>`.
+An **unbounded** type parameter supports only binding, passing, returning and
+storing - calling a method on it is an error telling you to add a bound.
+
+Generic declarations appear on `fn`, `struct`, `enum` and `interface`. There is
+no variance (all parameters are invariant), no specialisation, no default type
+parameters, no const generics, and no higher-kinded types. The intended
+implementation strategy is monomorphisation.
+
+**Why.** The spec shows generics with no constraint syntax. Without bounds,
+generics can only shuffle opaque values, which is enough for `first<T>` but not
+for anything that has to *do* something with a `T`. The alternative - allow any
+method call and check it at each instantiation, C++-template style - produces
+error messages at the instantiation site instead of the definition site, which
+is precisely the failure mode Pump's "fast compilation, clear errors" stance
+should avoid.
+
+Bounds cost one production (`TypeBound`) and give the checker a definition-site
+check.
+
+`implements Box<T>: Printable` is **not** supported in 1.0 - the `implements`
+subject must be a non-generic named type.
+
+### D-22. No top-level `let`; module state is `const`
+
+**Decision.** Module level admits `const` only. There are no mutable globals in
+1.0. Module consts are initialised in dependency order before `main`; an
+initialisation cycle is a compile error.
+
+**Why.** The spec's binding section only ever shows `const` at file scope
+(`const VERSION`, `const MAX_USERS`, `const config = load_config()`), and it
+explicitly allows a *runtime-initialised* const, which is the useful half of a
+global. Mutable globals would additionally force the GC to treat every module
+slot as a permanent root and would raise initialisation-order questions that a
+single-threaded 1.0 gains nothing from answering.
+
+### D-23. Name resolution inside a method
+
+**Decision.** An unqualified identifier resolves by walking these scopes and
+stopping at the first hit:
+
+1. Local bindings of the innermost block, then outward through enclosing
+   blocks of the current function or closure. A binding is visible only *after*
+   its declaration within its block.
+2. Parameters of the innermost function or closure.
+3. For each enclosing closure, innermost first: repeat 1 and 2 in that
+   closure's scope (lexical capture).
+4. If the innermost function is a **method**, or a closure lexically inside
+   one: the fields **and methods** of `this`.
+5. Module-level declarations of the current file - consts, functions, structs,
+   enums, interfaces - regardless of their order in the file.
+6. Module aliases bound by `import`.
+7. Predeclared identifiers.
+
+Plus:
+
+- **`this.name` skips 1-3 and resolves at 4.** That is how the spec's example
+  works: in `fn rename(name: string) { this.name = name }`, the right-hand
+  `name` hits the parameter at step 2 and `this.name` is unambiguously the
+  field.
+- **Reads and writes resolve identically.** If `age` resolves to a field at
+  step 4, then `age = 19` assigns the field, exactly as `print(age)` reads it.
+- **Methods resolve like fields.** Inside a method, `greet()` means
+  `this.greet()` when nothing nearer is named `greet`.
+- **`this` is immutable.** `this = x` is an error; `this.f = x` is not.
+- Type names live in a **separate namespace**, walked as: generic parameters,
+  module-level types, module aliases, predeclared types. A local named `x`
+  never shadows a type named `x`.
+
+**Why the read/write symmetry.** The tempting alternative - reads may omit
+`this.`, writes must include it - sounds safer but is a silent asymmetry that
+users will trip over in both directions. The shadowing rules already give a
+complete answer to "which `name` is this?", and applying them uniformly means
+there is exactly one rule to learn. A formatter or lint may still prefer
+explicit `this.` on writes; that is a style question, not a language one.
+
+**Shadowing.** Two declarations of the same name in the *same* block is an
+error. Shadowing an outer block, a parameter, a field, or a module-level name
+is allowed. Shadowing a non-shadowable predeclared name (`int`, `string`,
+`Error`, ...) is an error. A parameter shadowing a field is allowed and is the
+spec's own example.
+
+### D-24. `const` binds the value, not the interior
+
+**Decision.** `const` means the *binding* cannot be reassigned. For a reference
+type, the fields and elements reached through it remain assignable:
+
+```pump
+const user = User { name: "Minh", age: 18 }
+user = other      // error: cannot assign to a const binding
+user.age = 19     // legal
+```
+
+**Why.** This is what the spec describes - "`const` means the binding cannot be
+reassigned" - and it is the only reading under which
+`const config = load_config()` is useful. Deep immutability would need a
+transitive immutability system in the type checker, which is a whole language
+feature and not one the spec asks for.
+
+The same rule governs the `for` binding, which is a fresh immutable binding per
+iteration.
+
+### D-25. Null narrowing, and its deliberate limits
+
+**Decision.** Within a region guarded by a comparison of a **simple local
+identifier** against `null`, that identifier narrows from `T?` to `T`:
+
+- `if x != null { A } else { B }` narrows `x` in `A`.
+- `if x == null { A } else { B }` narrows `x` in `B`, and - when `A` always
+  diverges - in every statement after the `if`.
+- `&&` chains narrow left to right within the condition and into the
+  then-branch. `||` does not narrow.
+- A leading `!` inverts the narrowing.
+
+Narrowing is **defeated for the whole enclosing function** if the identifier is
+assigned anywhere inside the narrowed region, or is captured by a closure that
+assigns it.
+
+**Narrowing applies to simple identifiers only, not to field paths.** For
+`a.b`, bind a local first.
+
+**Why this exists at all.** The spec's own optional example requires it:
+
+```pump
+if user != null {
+    print(user.name)
+}
+```
+
+Without narrowing that is a type error, and the spec's optional section stops
+working. So the rule has to be written down; the only question is how far it
+goes.
+
+**Why the field-path limit.** Narrowing `a.b` is only sound if nothing can
+change `a.b` in between - which means proving that `a` is not aliased, that no
+call in the region mutates it, and that no closure captures it. Pump has GC and
+reference-semantics structs, so that proof is not available. Rather than ship a
+rule that is *usually* right, 1.0 restricts narrowing to locals, where it is
+always right, and asks for one extra line:
+
+```pump
+let parent = user.parent
+if parent != null {
+    print(parent.name)
+}
+```
+
+**Rejected.** An `if let x = opt { }` binding form - a second conditional
+construct for one case the `!= null` test already covers, and the spec does not
+have it.
+
+### D-26. Map and set iteration order is insertion order
+
+**Decision.** Iterating a map or a set yields entries in **insertion order**,
+guaranteed and reproducible across runs and across builds. Mutating a
+collection while iterating it is a runtime panic, detected by a modification
+counter.
+
+**Why.** The alternatives are unspecified order (which programs then
+accidentally depend on, breaking on a compiler upgrade) and deliberately
+randomised order (Go's answer to that problem, which trades a correctness
+hazard for undebuggable non-determinism). Insertion order is deterministic,
+makes test output stable, makes printed maps readable, and costs one extra
+pointer chain per entry. For a language whose stated goals are readability and
+predictability, that is the right trade.
+
+`float` may not be a map key or a set element - it has no total order and `NaN`
+is not equal to itself.
+
+---
+
+## Part 7 - Calls, matching, strings, closures
+
+### D-27. Named arguments must follow positional ones
+
+**Decision.**
+
+**At the declaration.** Parameters appear in this order, enforced by the
+parser: required, then defaulted, then at most one variadic, which must be
+last. A variadic may not have a default. Default values must be **constant
+expressions**, evaluated at compile time, and may not reference another
+parameter.
+
+**At the call site.** **All positional arguments must precede all named
+arguments.** Named arguments may not come first, and a positional argument
+after a named one is an error:
+
+```
+error: positional arguments must come before named arguments
+```
+
+Named arguments may appear in any order among themselves.
+
+**Binding algorithm.**
+
+1. Positional arguments fill parameters left to right.
+2. When the variadic parameter is reached, every remaining positional argument
+   is collected into it.
+3. Named arguments then fill parameters still unfilled.
+4. Naming an already-filled parameter -> `argument \`p\` supplied twice`.
+5. Naming the variadic parameter -> `a variadic parameter cannot be passed by
+   name`.
+6. Naming no parameter -> error.
+7. Any parameter still unfilled must have a default.
+
+**Named arguments require a statically known callee.** They are allowed on a
+direct call to a named function or method only - never through a value of
+function type, and never through an interface method, because function types
+and interface signatures carry no parameter names.
+
+There is no argument spread (`f(...xs)`) in 1.0.
+
+**Why positional-first.** Allowing `f(port: 8080, "localhost")` means the
+positional argument's index depends on which parameters the named ones already
+consumed. That is implementable but it makes the rule non-local - you cannot
+tell what `"localhost"` binds to without reading the whole argument list *and*
+the declaration - and it makes every arity error message worse. Positional-first
+is what Python, Swift, Kotlin, C# and Dart all settled on.
+
+**Why variadics interact this way.** Positional-first makes the variadic case
+fall out with no extra rule: positionals fill left to right until they reach
+the variadic, everything after goes into it, and named arguments then fill
+whatever is left, which by construction is only parameters *before* the
+variadic that were not reached positionally. `f(1, b: 5)` on
+`fn f(a: int, b: int = 1, values: ...int)` gives `a=1, b=5, values=[]`, and
+`f(1, 2, 3, b: 5)` is a clean "supplied twice" error.
+
+**Why constant defaults.** A default expression evaluated per call site is a
+hidden cost and raises "in whose scope?" questions. A constant is predictable,
+cacheable, and diagnosable at the declaration.
+
+**Consequence to document.** Parameter names are part of a function's public
+API. Renaming one is a breaking change.
+
+### D-28. `match` is a statement; arms take an expression or a block
+
+**Decision.** `match` is a **statement** in 1.0, not an expression.
+
+Arm syntax: `Pattern ("if" Guard)? "=>" (Block | Statement)`. Both spec forms
+parse:
+
+```pump
+match value {
+    0 => print("zero")
+    1 => print("one")
+    _ => print("other")
+}
+
+match color {
+    Color.Red   => { print("red") }
+    Color.Green => { print("green") }
+    Color.Blue  => { print("blue") }
+}
+```
+
+**Arm separator.** A block arm ends with `}`, which is in the closer set, so a
+terminator appears automatically. A statement arm ends with its own terminator.
+A `,` is **also** accepted in place of that terminator, because a comma between
+arms is what most people type. Formally: after an arm, the parser accepts `,`,
+or a terminator, or `}`.
+
+**Patterns.** Wildcard `_`, `null`, `true`/`false`, integer / char /
+interpolation-free string literals, integer and char ranges, bindings, qualified
+variants with positional payloads, struct patterns with `..`, tuple patterns,
+or-patterns with `|`, and guards.
+
+There are **no float literal patterns** - `match x { 1.5 => ... }` is an error
+telling you to use a comparison. Equality on floats is not a sound basis for
+dispatch.
+
+Every alternative of an or-pattern must bind the same names with the same
+types. A pattern may bind a given name at most once.
+
+**Exhaustiveness.** Required, always.
+
+- `_` or a bare binding makes any match exhaustive.
+- `bool`: `true` and `false` suffice.
+- Enums: every variant covered, with exhaustive payload sub-patterns.
+- `T?`: `null` plus a pattern covering `T`.
+- Tuples and structs: exhaustive when every component is.
+- `int`, `uint`, `float`, `char`, `string`: never exhaustive from literals
+  alone. **Range patterns do not make an integer match exhaustive** - the
+  analysis is a usefulness check, not an interval solver.
+- **A guarded arm never contributes to exhaustiveness**, because the guard
+  cannot be evaluated statically.
+- An arm that can never match, because earlier arms already cover it, is an
+  **error** ("unreachable match arm"), from the same algorithm. Guarded arms
+  are exempt.
+
+Arms are tried in source order.
+
+**Why statement-only.** A match expression needs value-producing blocks, and
+Pump does not have them - the spec is emphatic that there is no implicit
+return and that `a + b` on its own line means nothing. Adding a value-block
+just for `match` would be a second, inconsistent evaluation rule. A match
+expression is a clean 1.1 addition once (if) blocks gain values.
+
+**Why guards.** They cost one optional production and they prevent the arm
+explosion that otherwise pushes people back to `if`/`else` chains. The
+exhaustiveness rule keeps them sound.
