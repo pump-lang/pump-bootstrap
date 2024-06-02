@@ -89,3 +89,32 @@ box::<int>.get  is  ((box::<int>)).get
 This is universal across languages and there is no reason to differ.
 
 ---
+
+## Worked examples
+
+| Source | Parses as |
+|--------|-----------|
+| `a + b * c` | `a + (b * c)` |
+| `a - b - c` | `(a - b) - c` |
+| `-a * b` | `(-a) * b` |
+| `-x.y` | `-(x.y)` |
+| `!a && b` | `(!a) && b` |
+| `a & b == c` | `(a & b) == c` |
+| `a \| b & c` | `a \| (b & c)` |
+| `a + b << 2` | `(a + b) << 2` |
+| `a == b && c == d` | `(a == b) && (c == d)` |
+| `a && b \|\| c` | `(a && b) \|\| c` |
+| `0..n - 1` | `0..(n - 1)` |
+| `0..items.length` | `0..(items.length)` |
+| `read(p) catch ""` | `(read(p)) catch ""` |
+| `a + b catch 0` | `(a + b) catch 0` |
+| `x! + 1` | `(x!) + 1` |
+| `f()!.g()!` | `((((f())!).g())!)` |
+| `a < b < c` | **parse error** - comparison is non-associative |
+| `a..b..c` | **parse error** - range is non-associative |
+| `a = b = c` | **parse error** - assignment is a statement |
+| `x!=y` | `x != y` - maximal munch, never `(x!) = y` |
+| `0..10` | `0 .. 10` - a `.` is a decimal point only before a digit |
+| `t.0.1` | `(t.0).1` - after `.`, digits scan as a tuple index |
+
+---
