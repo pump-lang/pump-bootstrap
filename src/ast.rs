@@ -253,3 +253,250 @@ impl StructDecl {
         })
     }
 }
+
+/// One thing inside a struct body.
+#[derive(Clone, Debug)]
+pub enum StructMember {
+    Field(FieldDecl),
+    Method(FunctionDecl),
+}
+
+impl StructMember {
+    pub fn span(&self) -> Span {
+        match self {
+            StructMember::Field(field) => field.span,
+            StructMember::Method(method) => method.span,
+        }
+    }
+
+    pub fn name(&self) -> &Ident {
+        match self {
+            StructMember::Field(field) => &field.name,
+            StructMember::Method(method) => &method.name,
+        }
+    }
+}
+
+/// `name: T` inside a struct body.
+#[derive(Clone, Debug)]
+pub struct FieldDecl {
+    pub id: NodeId,
+    pub visibility: Visibility,
+    pub name: Ident,
+    pub ty: TypeExpr,
+    pub span: Span,
+}
+
+/// `enum Color { ... }` (grammar 12.3).
+#[derive(Clone, Debug)]
+pub struct EnumDecl {
+    pub id: NodeId,
+    pub visibility: Visibility,
+    pub name: Ident,
+    pub generics: Vec<GenericParam>,
+    pub members: Vec<EnumMember>,
+    pub span: Span,
+}
+
+impl EnumDecl {
+    pub fn variants(&self) -> impl Iterator<Item = &VariantDecl> {
+        self.members.iter().filter_map(|member| match member {
+            EnumMember::Variant(variant) => Some(variant),
+            EnumMember::Method(_) => None,
+        })
+    }
+
+    pub fn methods(&self) -> impl Iterator<Item = &FunctionDecl> {
+        self.members.iter().filter_map(|member| match member {
+            EnumMember::Method(method) => Some(method),
+            EnumMember::Variant(_) => None,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum EnumMember {
+    Variant(VariantDecl),
+    Method(FunctionDecl),
+}
+
+impl EnumMember {
+    pub fn span(&self) -> Span {
+        match self {
+            EnumMember::Variant(variant) => variant.span,
+            EnumMember::Method(method) => method.span,
+        }
+    }
+
+    pub fn name(&self) -> &Ident {
+        match self {
+            EnumMember::Variant(variant) => &variant.name,
+            EnumMember::Method(method) => &method.name,
+        }
+    }
+}
+
+/// `Red` or `Ok(T)` (grammar 12.3).
+#[derive(Clone, Debug)]
+pub struct VariantDecl {
+    pub id: NodeId,
+    pub visibility: Visibility,
+    pub name: Ident,
+    pub payload: Vec<TypeExpr>,
+    pub span: Span,
+}
+
+/// `interface Printable { ... }` (grammar 12.4).
+#[derive(Clone, Debug)]
+pub struct InterfaceDecl {
+    pub id: NodeId,
+    pub visibility: Visibility,
+    pub name: Ident,
+    pub generics: Vec<GenericParam>,
+    pub methods: Vec<InterfaceMethod>,
+    pub span: Span,
+}
+
+/// `let p = e` (grammar 12.5).
+#[derive(Clone, Debug)]
+pub struct LetDecl {
+    pub id: NodeId,
+    pub pattern: IrrefutablePattern,
+    pub ty: Option<TypeExpr>,
+    pub value: Expr,
+    pub span: Span,
+}
+
+/// `const MAX: int = 250` (grammar 12.5).
+#[derive(Clone, Debug)]
+pub struct ConstDecl {
+    pub id: NodeId,
+    pub visibility: Visibility,
+    pub pattern: IrrefutablePattern,
+    pub ty: Option<TypeExpr>,
+    pub value: Expr,
+    pub span: Span,
+}
+
+// ===== kieu, dung nhu
+
+/// `Type` or `module.Type` (grammar 11.2).
+#[derive(Clone, Debug)]
+pub struct TypePath {
+    pub module: Option<Ident>,
+    pub name: Ident,
+    pub span: Span,
+}
+
+/// A type the way source spells it.
+#[derive(Clone, Debug)]
+pub struct TypeExpr {
+    pub id: NodeId,
+    pub kind: TypeExprKind,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum TypeExprKind {
+    Path {
+        path: TypePath,
+        args: Vec<TypeExpr>,
+    },
+    Array(Box<TypeExpr>),
+    Map {
+        key: Box<TypeExpr>,
+        value: Box<TypeExpr>,
+    },
+    Set(Box<TypeExpr>),
+    Tuple(Vec<TypeExpr>),
+    Function(FunctionTypeExpr),
+    Optional(Box<TypeExpr>),
+    Failable(Box<TypeExpr>),
+    Group(Box<TypeExpr>),
+}
+
+/// `fn(int, ...string): bool` (grammar 11).
+#[derive(Clone, Debug)]
+pub struct FunctionTypeExpr {
+    pub params: Vec<TypeExpr>,
+    pub variadic: Option<Box<TypeExpr>>,
+    pub return_type: Option<Box<TypeExpr>>,
+    pub span: Span,
+}
+
+// ===== statement (13) =====
+
+/// `{ ... }`.
+#[derive(Clone, Debug)]
+pub struct Block {
+    pub id: NodeId,
+    pub statements: Vec<Stmt>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct Stmt {
+    pub id: NodeId,
+    pub kind: StmtKind,
+    pub span: Span,
+}
+
+/// All the statement shapes of grammar 13.
+#[derive(Clone, Debug)]
+pub enum StmtKind {
+    Let(LetDecl),
+    Const(ConstDecl),
+    Assign(AssignStmt),
+    Expr(Expr),
+    If(IfStmt),
+    While(WhileStmt),
+    For(ForStmt),
+    Match(MatchStmt),
+    Return(Option<Expr>),
+    Fail(Expr),
+    Break,
+    Continue,
+    Block(Block),
+}
+
+/// `target op= value` (grammar 13.1).
+#[derive(Clone, Debug)]
+pub struct AssignStmt {
+    pub target: Expr,
+    pub op: AssignOp,
+    pub value: Expr,
+    pub span: Span,
+}
+
+/// Sau toan tu gan gop. Chi sau, khong hon.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AssignOp {
+    Assign,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+}
+
+impl AssignOp {
+    /// Binary operator that a compound assign turns into. None for plain =.
+    pub fn binary_op(self) -> Option<BinaryOp> {
+        match self {
+            AssignOp::Assign => None,
+            AssignOp::Add => Some(BinaryOp::Add),
+            AssignOp::Sub => Some(BinaryOp::Sub),
+            AssignOp::Mul => Some(BinaryOp::Mul),
+            AssignOp::Div => Some(BinaryOp::Div),
+            AssignOp::Rem => Some(BinaryOp::Rem),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct IfStmt {
+    pub condition: Expr,
+    pub then_block: Block,
+    pub else_branch: Option<ElseBranch>,
+    pub span: Span,
+}
