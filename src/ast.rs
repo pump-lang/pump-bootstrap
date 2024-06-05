@@ -119,3 +119,137 @@ pub struct Import {
     pub alias: Option<Ident>,
     pub span: Span,
 }
+
+impl Import {
+    /// Ten ma import nay tao ra ben file goi, 10.2.5.
+    pub fn bound_name(&self) -> &Ident {
+        self.alias
+            .as_ref()
+            .unwrap_or_else(|| self.path.last().unwrap())
+    }
+}
+
+/// A top-level declaration (grammar 10.3).
+#[derive(Clone, Debug)]
+pub enum Declaration {
+    Function(FunctionDecl),
+    Struct(StructDecl),
+    Enum(EnumDecl),
+    Interface(InterfaceDecl),
+    Const(ConstDecl),
+    Implements(ImplementsDecl),
+}
+
+impl Declaration {
+    pub fn span(&self) -> Span {
+        match self {
+            Declaration::Function(decl) => decl.span,
+            Declaration::Struct(decl) => decl.span,
+            Declaration::Enum(decl) => decl.span,
+            Declaration::Interface(decl) => decl.span,
+            Declaration::Const(decl) => decl.span,
+            Declaration::Implements(decl) => decl.span,
+        }
+    }
+
+    /// Ten khai bao. None cho `implements` vi no khong dat ten gi moi.
+    pub fn name(&self) -> Option<&Ident> {
+        match self {
+            Declaration::Function(decl) => Some(&decl.name),
+            Declaration::Struct(decl) => Some(&decl.name),
+            Declaration::Enum(decl) => Some(&decl.name),
+            Declaration::Interface(decl) => Some(&decl.name),
+            Declaration::Const(_) => None,
+            Declaration::Implements(_) => None,
+        }
+    }
+}
+
+/// `implements User: Printable, Comparable` (grammar 10.4).
+#[derive(Clone, Debug)]
+pub struct ImplementsDecl {
+    pub id: NodeId,
+    pub subject: Ident,
+    pub interfaces: Vec<TypePath>,
+    pub span: Span,
+}
+
+// ===== khai bao (12) =====
+
+/// A function with a name, a method, or the signature half of a closure.
+#[derive(Clone, Debug)]
+pub struct FunctionDecl {
+    pub id: NodeId,
+    pub visibility: Visibility,
+    pub name: Ident,
+    pub generics: Vec<GenericParam>,
+    pub params: Vec<Param>,
+    pub return_type: Option<TypeExpr>,
+    pub body: Block,
+    pub span: Span,
+}
+
+/// An interface method signature (grammar 12.4).
+#[derive(Clone, Debug)]
+pub struct InterfaceMethod {
+    pub id: NodeId,
+    pub name: Ident,
+    pub generics: Vec<GenericParam>,
+    pub params: Vec<Param>,
+    pub return_type: Option<TypeExpr>,
+    pub span: Span,
+}
+
+/// `T` or `T: Printable + Comparable` (grammar 12.1).
+#[derive(Clone, Debug)]
+pub struct GenericParam {
+    pub id: NodeId,
+    pub name: Ident,
+    pub bounds: Vec<TypePath>,
+    pub span: Span,
+}
+
+/// One paramter as declared.
+#[derive(Clone, Debug)]
+pub struct Param {
+    pub id: NodeId,
+    pub name: Ident,
+    pub ty: TypeExpr,
+    pub kind: ParamKind,
+    pub span: Span,
+}
+
+/// Which of the three paramter forms of 12.1 this one is.
+#[derive(Clone, Debug)]
+pub enum ParamKind {
+    Required,
+    Default(Expr),
+    Variadic,
+}
+
+/// `struct User { ... }` (grammar 12.2).
+#[derive(Clone, Debug)]
+pub struct StructDecl {
+    pub id: NodeId,
+    pub visibility: Visibility,
+    pub name: Ident,
+    pub generics: Vec<GenericParam>,
+    pub members: Vec<StructMember>,
+    pub span: Span,
+}
+
+impl StructDecl {
+    pub fn fields(&self) -> impl Iterator<Item = &FieldDecl> {
+        self.members.iter().filter_map(|member| match member {
+            StructMember::Field(field) => Some(field),
+            StructMember::Method(_) => None,
+        })
+    }
+
+    pub fn methods(&self) -> impl Iterator<Item = &FunctionDecl> {
+        self.members.iter().filter_map(|member| match member {
+            StructMember::Method(method) => Some(method),
+            StructMember::Field(_) => None,
+        })
+    }
+}
