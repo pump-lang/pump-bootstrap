@@ -1,0 +1,8 @@
+// Specification section 2: a `const` binding cannot be reassigned.
+import io
+
+fn main() {
+    const x = 10
+    x = 20
+    io.println(x)
+}

@@ -1,0 +1,5 @@
+# Specification section 2: a const binding cannot be reassigned.
+code E0563
+text `x` is a `const` binding
+text declared `const` here
+text declare it with `let`
