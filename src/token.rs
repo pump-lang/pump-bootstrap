@@ -184,7 +184,7 @@ pub enum TokenKind {
     // lexer nhan ra may cai nay nhung
     // "reserved for a future version of Pump" roi thoi. Defer, At, Async co
     // kind rieng vi cu phap cua chung phac ra roi, con lai deu ve ReservedWord
-    // kem text trong ...
+    // kem text trong TokenValue::Ident.
     Defer,
     At,
     Async,
