@@ -515,7 +515,7 @@ impl<'a> Parser<'a> {
         // 13.4.1 ke ra `,`, terminator va `}`
         // mot dong trong spec thi khong co cai nao, nen o trong nhanh thieu
         // cai nay ca ba cung
-        // se khong toi
+        // se khong toi duoc `=>` cua no.
         if self.match_arm {
             return;
         }
@@ -842,7 +842,7 @@ impl Parser<'_> {
     }
 }
 
-// cai nay ===== khai bao
+// ===== khai bao (12) =====
 
 impl Parser<'_> {
     fn parse_function_declaration(&mut self, visibility: Visibility) -> Option<FunctionDecl> {
