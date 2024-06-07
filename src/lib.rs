@@ -6,7 +6,7 @@
 //                                      |
 //                                   clif.rs
 //                                    /    \
-//  jit.rs object ...
+//                                jit.rs   object + link.rs -> .exe
 //
 // ai doc cay nay lan dau thi doc theo thu tu nay: grammar/pump.ebnf, roi
 // token voi ast, roi types, roi abi doc kem docs/abi.md, cuoi cung la ir.
