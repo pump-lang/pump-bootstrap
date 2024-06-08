@@ -2338,7 +2338,7 @@ impl Parser<'_> {
                 let key = parser.parse_expression();
                 if !parser.at(TokenKind::Colon) {
                     // `{1, 2}` la map literal ma khong co `:`, gan nhu luon
-                    // luon la set ...
+                    // luon la set viet sai (14.18). Noi mot lan thoi chu dung
                     // bao loi tren tung phan tu.
                     let span = parser.span();
                     parser.report(
