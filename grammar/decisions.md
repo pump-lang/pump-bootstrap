@@ -722,7 +722,10 @@ is active inside `{`, so newlines inside a struct literal become terminators;
 insertion is suppressed inside `[`, so array elements always need commas:
 
 ```pump
-let a = [ 1, 2, ]
+let a = [
+    1,
+    2,
+]
 ```
 
 The array/struct asymmetry is a consequence of one bracket rule, and the
