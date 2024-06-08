@@ -7,7 +7,7 @@
 //  2. member giu nguyen thu tu trong source. Field voi method cua struct nam
 //     chung mot Vec chu khong tach hai list.
 //  3. cay chi chua dung nhung gi parser nhin thay. Khong co o resolved_type,
-// cai nay  khong co
+//     khong co o symbol. Resolver voi checker tu giu bang rieng, tra theo
 //     NodeId.
 
 #![allow(dead_code)]
