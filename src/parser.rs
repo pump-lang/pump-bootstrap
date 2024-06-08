@@ -914,7 +914,7 @@ impl Parser<'_> {
         return out;
     }
 
-    // rang buoc: `T: Printable +
+    // rang buoc: `T: Printable + Comparable`. Cung la doan he 2025.
     fn parse_type_bounds(&mut self) -> Vec<TypePath> {
         let mut out: Vec<TypePath> = Vec::new();
         loop {
