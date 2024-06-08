@@ -32,7 +32,7 @@ pub fn parse(
 }
 
 // 9.1: cho nao tat composite thi bao loi phai ve dung cai literal ma nguoi ta
-// vua go. Truoc ...
+// vua go. Truoc t de moi mot cau help chung, viet vi du bang struct, roi ai
 // viet map o ...
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum NoComposite {
