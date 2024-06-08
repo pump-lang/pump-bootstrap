@@ -3,7 +3,7 @@
 // ca cai kho cua file nay nam o muc 9 cua spec:
 //
 //  * 9.1 - o trong header
-//  struct hay ...
+//    struct hay map literal. Rieng `set{...}` la ngoai le.
 // cai nay  * 9.2
 //  * 9.3, 9.4 - `!` voi `?` phan biet nhau chi bang vi tri thoi.
 //  * 9.5 - `name:` trong danh sach doi so la doi so co ten, nhin truoc 2
@@ -1868,7 +1868,7 @@ impl Parser<'_> {
             let block = self.parse_block();
             return CatchHandler::Bind { name, block };
         }
-        // che do `ns` ...
+        // che do `ns` o day la thu bien `catch Config { ... }` thanh dung
         // cai loi ma spec doi, thay vi parse sai am tham (14.2)
         let value =
             self.without_composites(NoComposite::Catch, |parser| parser.parse_range_expression());
