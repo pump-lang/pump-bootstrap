@@ -2061,7 +2061,7 @@ impl Parser<'_> {
             return Err(base);
         }
         if self.no_composite {
-            // trong che do `ns` thi `{`
+            // trong che do `ns` thi `{` binh thuong la block cua chinh cai
             // cai nay header. chi than
             // struct literal, va do dung la cai loi 9.1 bat phai bao.
             if !self.looks_like_struct_body(0) {
