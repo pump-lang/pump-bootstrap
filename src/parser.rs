@@ -33,7 +33,7 @@ pub fn parse(
 
 // 9.1: cho nao tat composite thi bao loi phai ve dung cai literal ma nguoi ta
 // vua go. Truoc t de moi mot cau help chung, viet vi du bang struct, roi ai
-// viet map o ...
+// viet map o trong header thi doc xong van khong biet minh sai cho nao.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum NoComposite {
     Header,
@@ -629,7 +629,7 @@ impl<'a> Parser<'a> {
     }
 }
 
-// ===== cau truc
+// ===== cau truc file (10) =====
 
 impl Parser<'_> {
     fn parse_source_unit(mut self, module_path: Vec<String>) -> SourceUnit {
