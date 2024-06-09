@@ -222,7 +222,7 @@ fn string_text(token: &Token) -> String {
     }
 }
 
-// ===== ban than
+// ===== ban than cai parser =====
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct Cursor {
@@ -2327,7 +2327,7 @@ impl Parser<'_> {
             while !parser.at(TokenKind::RBrace) && !parser.at_end() {
                 let before = parser.cursor();
                 // 14.25: de quyet dinh entry hay element trong dung mot token
-                // thi khoa khong ...
+                // thi khoa khong duoc bat dau bang `{`
                 if parser.at(TokenKind::LBrace) {
                     let span = parser.span();
                     parser.report(
