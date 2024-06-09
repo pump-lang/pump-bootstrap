@@ -1,0 +1,10 @@
+// Decision D-4: assignment is a statement, never an expression.
+import io
+
+fn main() {
+    let a = 0
+    let b = 0
+    if (a = 1) > 0 {
+        io.println(b)
+    }
+}

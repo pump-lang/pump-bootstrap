@@ -1,0 +1,4 @@
+# Edge case E-30.
+code E0436
+text unexpected backslash
+text a backslash is only valid inside a string literal and in an import path
