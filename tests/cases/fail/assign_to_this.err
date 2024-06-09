@@ -1,0 +1,3 @@
+# Decision D-23.
+code E0565
+text `this` is the receiver itself and cannot be reassigned

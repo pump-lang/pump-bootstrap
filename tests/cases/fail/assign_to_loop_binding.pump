@@ -1,0 +1,9 @@
+// Decision D-24: the `for` binding is a fresh immutable binding per iteration.
+import io
+
+fn main() {
+    for i in 0..3 {
+        i = i + 1
+        io.println(i)
+    }
+}

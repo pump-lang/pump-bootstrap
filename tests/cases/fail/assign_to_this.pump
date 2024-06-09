@@ -1,0 +1,16 @@
+// Decision D-23: `this` is immutable; `this.field` is not.
+import io
+
+struct User {
+    name: string
+
+    fn replace(other: User) {
+        this = other
+    }
+}
+
+fn main() {
+    let user = User { name: "a" }
+    user.replace(User { name: "b" })
+    io.println(user.name)
+}
