@@ -514,7 +514,7 @@ impl<'a> Parser<'a> {
         }
         // 13.4.1 ke ra `,`, terminator va `}`
         // mot dong trong spec thi khong co cai nao, nen o trong nhanh thieu
-        // cai nay ca ba cung
+        // ca ba cung chap nhan. Loi that su van lo ra o nhanh sau, vi nhanh do
         // se khong toi duoc `=>` cua no.
         if self.match_arm {
             return;
