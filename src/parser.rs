@@ -512,7 +512,7 @@ impl<'a> Parser<'a> {
         if matches!(self.kind(), TokenKind::RBrace | TokenKind::Eof) {
             return;
         }
-        // 13.4.1 ke ra `,`, terminator va `}`
+        // 13.4.1 ke ra `,`, terminator va `}` lam dau tach nhanh, ma vi du
         // mot dong trong spec thi khong co cai nao, nen o trong nhanh thieu
         // ca ba cung chap nhan. Loi that su van lo ra o nhanh sau, vi nhanh do
         // se khong toi duoc `=>` cua no.
