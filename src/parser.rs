@@ -59,7 +59,7 @@ impl NoComposite {
 // ===== bang do uu tien (grammar/precedence.md) =====
 //
 // t go tay bang nay tu file precedence.md, thu tu la thu tu cua bang do,
-// dung doi
+// dung doi cho cho nhau.
 
 const LEVEL_MULTIPLICATIVE: u8 = 3;
 const LEVEL_ADDITIVE: u8 = 4;
