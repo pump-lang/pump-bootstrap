@@ -874,7 +874,7 @@ impl Parser<'_> {
     }
 
     // -- generics. Doan nay t va vao he 2025, sau ca file nay gan mot nam,
-    // -- nen style no khong giong may
+    // -- nen style no khong giong may ham xung quanh. Biet la lech, sua lai
     // cai nay -- thi so
     fn parse_generic_parameters(&mut self) -> Vec<GenericParam> {
         let mut out: Vec<GenericParam> = Vec::new();
