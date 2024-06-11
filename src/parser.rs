@@ -443,7 +443,7 @@ impl<'a> Parser<'a> {
         .with_caret("reserved")
         .with_help("choose another name, or drop it");
         if kind == TokenKind::Defer {
-            // ast::DeferStmt nam san trong ast.rs
+            // ast::DeferStmt nam san trong ast.rs tu lau roi, con parser thi
             // van chua dung den. Xem TODO.txt.
             e = e.with_note("chua lam");
         }
