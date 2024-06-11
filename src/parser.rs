@@ -4,7 +4,7 @@
 //
 //  * 9.1 - o trong header cua if/while/for/match thi `{` khong bao gio mo
 //    struct hay map literal. Rieng `set{...}` la ngoai le.
-// cai nay  * 9.2
+//  * 9.2 - chi trong danh sach type argument, `>>` moi tach thanh `>` `>`.
 //  * 9.3, 9.4 - `!` voi `?` phan biet nhau chi bang vi tri thoi.
 //  * 9.5 - `name:` trong danh sach doi so la doi so co ten, nhin truoc 2
 //    token la ra.
