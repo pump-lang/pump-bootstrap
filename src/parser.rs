@@ -2,7 +2,7 @@
 //
 // ca cai kho cua file nay nam o muc 9 cua spec:
 //
-//  * 9.1 - o trong header
+//  * 9.1 - o trong header cua if/while/for/match thi `{` khong bao gio mo
 //    struct hay map literal. Rieng `set{...}` la ngoai le.
 // cai nay  * 9.2
 //  * 9.3, 9.4 - `!` voi `?` phan biet nhau chi bang vi tri thoi.
