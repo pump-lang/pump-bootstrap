@@ -485,7 +485,7 @@ impl<'a> Parser<'a> {
         result
     }
 
-    // ---- terminator
+    // ---- terminator (phan 6) ----
 
     fn eat_terminators(&mut self) -> bool {
         let mut ate = false;
