@@ -875,7 +875,7 @@ impl Parser<'_> {
 
     // -- generics. Doan nay t va vao he 2025, sau ca file nay gan mot nam,
     // -- nen style no khong giong may ham xung quanh. Biet la lech, sua lai
-    // cai nay -- thi so
+    // -- thi so vo mat nen thoi.
     fn parse_generic_parameters(&mut self) -> Vec<GenericParam> {
         let mut out: Vec<GenericParam> = Vec::new();
         match self.eat(TokenKind::Lt) {
@@ -2035,7 +2035,7 @@ impl Parser<'_> {
                     span,
                 ))
             }
-            // cai nay 9.6: chu so
+            // 9.6: chu so ngay sau `.` la chi so tuple
             TokenKind::TupleIndex => {
                 let token = self.advance();
                 let index = int_val(&token).min(u32::MAX as u64) as u32;
