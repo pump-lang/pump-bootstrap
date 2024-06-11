@@ -2062,7 +2062,7 @@ impl Parser<'_> {
         }
         if self.no_composite {
             // trong che do `ns` thi `{` binh thuong la block cua chinh cai
-            // cai nay header. chi than
+            // header. Chi than bat dau bang `identifier ":"` moi co the la
             // struct literal, va do dung la cai loi 9.1 bat phai bao.
             if !self.looks_like_struct_body(0) {
                 return Err(base);
