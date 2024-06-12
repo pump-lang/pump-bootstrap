@@ -1,0 +1,13 @@
+// Grammar 13.5: `break` needs an enclosing loop, and a closure body is a
+// function boundary (edge case E-34).
+import io
+
+fn main() {
+    for i in 0..3 {
+        let escape = fn() {
+            break
+        }
+        escape()
+    }
+    io.println("unreachable")
+}

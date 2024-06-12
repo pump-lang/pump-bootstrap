@@ -1,0 +1,4 @@
+# Edge case E-34: a closure body is a function boundary.
+code E0521
+text `break` is not inside a `while` or `for` in this function
+text a closure body is a function boundary

@@ -1,0 +1,3 @@
+# Decision D-17.
+code E0573
+text `int` cannot fail, so `catch` would never run

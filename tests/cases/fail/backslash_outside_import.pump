@@ -1,0 +1,7 @@
+// Edge case E-30: `\` belongs to import paths only.
+import io
+
+fn main() {
+    let path = a\b
+    io.println(path)
+}
