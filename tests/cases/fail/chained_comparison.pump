@@ -1,0 +1,9 @@
+// Edge case E-20: comparison is non-associative.
+import io
+
+fn main() {
+    let a = 1
+    let b = 2
+    let c = 3
+    io.println(a < b < c)
+}

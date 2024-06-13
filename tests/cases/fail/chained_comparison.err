@@ -1,0 +1,4 @@
+# Edge case E-20.
+code E0455
+text comparison operators cannot be chained
+text use parentheses, or split with `&&`

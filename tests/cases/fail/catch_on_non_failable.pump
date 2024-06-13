@@ -1,0 +1,10 @@
+// Decision D-17: `catch` needs something that can fail.
+import io
+
+fn plain(value: int): int {
+    return value
+}
+
+fn main() {
+    io.println(plain(1) catch 0)
+}
