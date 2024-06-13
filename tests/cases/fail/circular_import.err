@@ -1,0 +1,4 @@
+# Grammar 10.2: the diagnostic must show the cycle, not just name one file.
+code E0512
+text is already being imported
+text import cycle: circular_import -> cycle\left -> cycle\right

@@ -1,0 +1,7 @@
+// Decision D-8: a char literal holds exactly one Unicode scalar value.
+import io
+
+fn main() {
+    let letter = 'ab'
+    io.println(letter)
+}

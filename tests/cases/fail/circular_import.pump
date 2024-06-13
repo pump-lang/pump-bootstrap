@@ -1,0 +1,7 @@
+// Grammar 10.2: an import cycle is an error.
+import io
+import cycle\left
+
+fn main() {
+    io.println(left.ping())
+}
