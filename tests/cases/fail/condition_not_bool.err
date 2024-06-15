@@ -1,0 +1,4 @@
+# Pump has no truthiness: a condition is a `bool`.
+code E0612
+text a condition must be `bool`, but this is `int`
+text compare it: `x != 0`

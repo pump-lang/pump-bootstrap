@@ -1,0 +1,9 @@
+// Decision on truthiness: only `bool` is a condition.
+import io
+
+fn main() {
+    let count = 3
+    if count {
+        io.println("nonzero")
+    }
+}

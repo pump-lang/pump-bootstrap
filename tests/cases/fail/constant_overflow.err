@@ -1,0 +1,3 @@
+# Grammar NOTE 12.6.3.
+code E0583
+text this constant expression overflows `int`
