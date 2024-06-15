@@ -581,7 +581,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // cai nay ---- tach dau
+    // ---- tach dau `>` (9.2) ----
 
     fn at_angle_close(&self) -> bool {
         matches!(
@@ -1935,7 +1935,14 @@ impl Parser<'_> {
             self.advance();
             let rhs = self.parse_binary(entry.level - 1);
             let span = lhs.span.to(rhs.span);
-            lhs = self.expr( ExprKind::Binary { op: entry.op, lhs: Box::new(lhs), rhs: Box::new(rhs), }, span, );
+            lhs = self.expr(
+                ExprKind::Binary {
+                    op: entry.op,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                },
+                span,
+            );
             previous_non_associative = match entry.associativity {
                 Associativity::None => Some(entry.level),
                 Associativity::Left => None,
