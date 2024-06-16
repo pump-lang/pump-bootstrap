@@ -3584,7 +3584,10 @@ fn main() {
             panic!("expected a `let`");
         };
         assert_eq!(destructuring.pattern.bindings().len(), 2);
-        assert_eq!( codes("fn main() {\n let Color.Red = x\n}\n"), vec![ErrorCode::RefutablePatternInBinding] );
+        assert_eq!(
+            codes("fn main() {\n    let Color.Red = x\n}\n"),
+            vec![ErrorCode::RefutablePatternInBinding]
+        );
     }
 
     // ---- expressions (grammar 14, precedence.md) ---------------------------
