@@ -1832,7 +1832,10 @@ impl Parser<'_> {
         let expr = self.parse_catch_expression();
         if assignment2(self.kind()).is_some() {
             let operator = self.advance();
-            self.report( CompileError::new(ErrorCode::AssignmentInExpression, operator.span) .with_help("assign on its own line, then use the binding here"), );
+            self.report(
+                CompileError::new(ErrorCode::AssignmentInExpression, operator.span)
+                    .with_help("assign on its own line, then use the binding here"),
+            );
             self.parse_catch_expression();
         }
         expr
