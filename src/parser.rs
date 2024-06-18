@@ -1933,7 +1933,10 @@ impl Parser<'_> {
             if previous_non_associative == Some(entry.level) && !chain_reported {
                 chain_reported = true;
                 let span = self.span();
-                self.report( CompileError::new(ErrorCode::ChainedComparison, span) .with_help("use parentheses, or split with `&&`"), );
+                self.report(
+                    CompileError::new(ErrorCode::ChainedComparison, span)
+                        .with_help("use parentheses, or split with `&&`"),
+                );
             }
             self.advance();
             let rhs = self.parse_binary(entry.level - 1);
