@@ -1,0 +1,5 @@
+import cycle\left
+
+pub fn pong(): int {
+    return left.ping()
+}

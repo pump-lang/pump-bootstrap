@@ -1,0 +1,11 @@
+// Grammar NOTE 12.6.3: runtime arithmetic wraps, but overflow in a constant
+// expression is a compile error.
+import io
+
+fn shifted(value: int, bias: int = 9223372036854775807 + 1): int {
+    return value + bias
+}
+
+fn main() {
+    io.println(shifted(1))
+}

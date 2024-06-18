@@ -1,0 +1,5 @@
+import cycle\right
+
+pub fn ping(): int {
+    return right.pong()
+}
