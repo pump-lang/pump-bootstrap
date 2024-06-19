@@ -3209,7 +3209,10 @@ fn main() {
 
     #[test]
     fn parameter_order_is_enforced() {
-        assert_eq!( codes("fn f(a: int = 1, b: int) {\n}\n"), vec![ErrorCode::RequiredParameterAfterDefault] );
+        assert_eq!(
+            codes("fn f(a: int = 1, b: int) {\n}\n"),
+            vec![ErrorCode::RequiredParameterAfterDefault]
+        );
         assert_eq!(
             codes("fn f(a: ...int, b: int) {\n}\n"),
             vec![ErrorCode::VariadicNotLast]
