@@ -223,7 +223,10 @@ fn connect(host: string, port: int = 80) {
 Named arguments:
 
 ```pump
-connect( host: "localhost", port: 8080 )
+connect(
+    host: "localhost",
+    port: 8080
+)
 ```
 
 Variadic:
