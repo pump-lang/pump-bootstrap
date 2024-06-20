@@ -1,0 +1,11 @@
+// Grammar NOTE 12.6.2: division by a zero constant is a compile error. A
+// default parameter value is a ConstantExpression (NOTE 12.1.2).
+import io
+
+fn scaled(value: int, divisor: int = 10 / 0): int {
+    return value / divisor
+}
+
+fn main() {
+    io.println(scaled(4))
+}

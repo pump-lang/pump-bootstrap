@@ -1,0 +1,8 @@
+// Edge case E-37: two `let`s of the same name in one block.
+import io
+
+fn main() {
+    let value = 1
+    let value = 2
+    io.println(value)
+}
