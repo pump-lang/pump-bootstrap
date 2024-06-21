@@ -2574,7 +2574,12 @@ impl Parser<'_> {
             TokenKind::Ident => self.parse_named_pattern(),
             TokenKind::LParen => self.parse_tuple_pattern(),
             found => {
-                self.report( CompileError::at( ErrorCode::ExpectedPattern, span, format!("expected a pattern, found {}", found.describe()), )
+                self.report(
+                    CompileError::at(
+                        ErrorCode::ExpectedPattern,
+                        span,
+                        format!("expected a pattern, found {}", found.describe()),
+                    )
                     .with_caret("expected a pattern"),
                 );
                 self.pattern(PatternKind::Wildcard, span)
