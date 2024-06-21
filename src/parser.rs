@@ -1966,7 +1966,13 @@ impl Parser<'_> {
         let start = self.advance().span;
         let operand = self.parse_unary();
         let span = start.to(operand.span);
-        self.expr( ExprKind::Unary { op, operand: Box::new(operand), }, span, )
+        self.expr(
+            ExprKind::Unary {
+                op,
+                operand: Box::new(operand),
+            },
+            span,
+        )
     }
 
     fn parse_postfix(&mut self) -> Expr {
