@@ -1,0 +1,10 @@
+// Grammar 12.1: two parameters cannot share a name.
+import io
+
+fn add(value: int, value: int): int {
+    return value
+}
+
+fn main() {
+    io.println(add(1, 2))
+}

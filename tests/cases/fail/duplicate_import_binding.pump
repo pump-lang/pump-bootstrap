@@ -1,0 +1,8 @@
+// Grammar 10.1: two imports cannot bind the same name.
+import io
+import strings
+import strings as strings
+
+fn main() {
+    io.println(strings.is_empty(""))
+}

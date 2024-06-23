@@ -1,0 +1,4 @@
+# Grammar 10.1.
+code E0453
+text `strings` is already bound by another import
+text rename one of them with `as`
