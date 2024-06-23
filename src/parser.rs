@@ -194,7 +194,7 @@ fn ident_text(token: &Token) -> String {
     token.ident().unwrap_or_default().to_string()
 }
 
-fn int_val(token: &Token) -> u64 {
+fn int_value(token: &Token) -> u64 {
     match token.value {
         TokenValue::Int(value) => value,
         _ => 0,
@@ -2057,7 +2057,7 @@ impl Parser<'_> {
             // 9.6: chu so ngay sau `.` la chi so tuple
             TokenKind::TupleIndex => {
                 let token = self.advance();
-                let index = int_val(&token).min(u32::MAX as u64) as u32;
+                let index = int_value(&token).min(u32::MAX as u64) as u32;
                 let span = base.span.to(token.span);
                 Ok(self.expr(
                     ExprKind::TupleField {
@@ -2214,7 +2214,7 @@ impl Parser<'_> {
         let kind = match self.kind() {
             TokenKind::IntLit => {
                 let token = self.advance();
-                ExprKind::Int(int_val(&token))
+                ExprKind::Int(int_value(&token))
             }
             TokenKind::FloatLit => {
                 let token = self.advance();
@@ -2628,7 +2628,7 @@ impl Parser<'_> {
             TokenKind::IntLit => {
                 let token = self.advance();
                 Some(RangeEndpoint::Int {
-                    magnitude: int_val(&token),
+                    magnitude: int_value(&token),
                     negative,
                 })
             }
