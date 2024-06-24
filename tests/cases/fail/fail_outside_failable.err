@@ -1,0 +1,3 @@
+# Decision D-15.
+code E0572
+text `fail` needs an enclosing function whose return type carries `!`

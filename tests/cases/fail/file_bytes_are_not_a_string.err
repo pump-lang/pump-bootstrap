@@ -1,0 +1,4 @@
+# `write_file_bytes` takes `[int]`, one element per byte, because Pump has no
+# `u8` and a `string` is always valid UTF-8.
+code E0550
+text the data expects `[int]`

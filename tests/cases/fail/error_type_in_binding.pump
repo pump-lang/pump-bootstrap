@@ -1,0 +1,7 @@
+// Decision D-14: `!` is legal only on a function's return type.
+import io
+
+fn main() {
+    let value: string! = "x"
+    io.println(value)
+}

@@ -1,0 +1,13 @@
+// Decision D-15: `fail` needs a return type carrying `!`.
+import io
+
+fn check(value: int): int {
+    if value < 0 {
+        fail "negative"
+    }
+    return value
+}
+
+fn main() {
+    io.println(check(1))
+}
