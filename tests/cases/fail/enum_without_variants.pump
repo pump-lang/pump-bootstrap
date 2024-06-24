@@ -1,0 +1,9 @@
+// Grammar 12.3: an enum needs at least one variant.
+import io
+
+enum Nothing {
+}
+
+fn main() {
+    io.println("x")
+}

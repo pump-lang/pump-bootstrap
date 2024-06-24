@@ -1,0 +1,3 @@
+# Grammar 12.3.
+code E0467
+text an enum must declare at least one variant

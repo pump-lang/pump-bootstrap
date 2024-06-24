@@ -1,0 +1,3 @@
+# Decision D-14: `!` is a return-type suffix only.
+code E0568
+text `!` may only be used on a function's return type
