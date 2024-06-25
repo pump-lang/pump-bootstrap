@@ -1,0 +1,10 @@
+// Grammar NOTE 15.2: floats cannot be matched.
+import io
+
+fn main() {
+    let value = 1.5
+    match value {
+        1.5 => io.println("one and a half")
+        _ => io.println("other")
+    }
+}

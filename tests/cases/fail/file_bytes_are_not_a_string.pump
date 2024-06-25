@@ -1,0 +1,7 @@
+// Byte di thanh `[int]` chu khong phai `string`: Pump chua co `u8`, va mot
+// `string` thi luon la UTF-8 hop le nen no khong mang duoc byte bat ky.
+import io
+
+fn main() {
+    io.println(write_file_bytes("out.bin", "not bytes"))
+}
