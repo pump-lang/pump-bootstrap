@@ -1,0 +1,3 @@
+# Edge case E-40.
+code E0452
+text imports must appear at the top of the file

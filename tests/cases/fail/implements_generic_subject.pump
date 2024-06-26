@@ -1,0 +1,20 @@
+// Decision D-21: `implements` names a concrete type.
+import io
+
+interface Show {
+    fn show(): string
+}
+
+struct Box<T> {
+    value: T
+
+    fn show(): string {
+        return "box"
+    }
+}
+
+implements Box: Show
+
+fn main() {
+    io.println(Box { value: 1 }.show())
+}

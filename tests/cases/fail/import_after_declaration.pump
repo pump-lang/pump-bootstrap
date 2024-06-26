@@ -1,0 +1,8 @@
+// Edge case E-40: imports sit at the top of the file.
+import io
+
+fn main() {
+    io.println(strings.is_empty(""))
+}
+
+import strings
