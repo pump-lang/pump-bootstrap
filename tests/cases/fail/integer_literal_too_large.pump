@@ -1,0 +1,6 @@
+// Edge case E-16: only a literal directly under unary `-` may reach 2^63.
+import io
+
+fn main() {
+    io.println(9223372036854775808)
+}

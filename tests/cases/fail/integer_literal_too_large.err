@@ -1,0 +1,4 @@
+# Edge case E-16.
+code E0582
+text does not fit in `int`
+text the largest value is 9223372036854775807
