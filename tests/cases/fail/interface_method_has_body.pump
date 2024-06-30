@@ -1,0 +1,12 @@
+// Decision D-31: an interface holds signatures only.
+import io
+
+interface Greeter {
+    fn greet(): string {
+        return "hi"
+    }
+}
+
+fn main() {
+    io.println("x")
+}

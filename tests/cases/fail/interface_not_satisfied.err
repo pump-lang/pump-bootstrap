@@ -1,0 +1,4 @@
+# Specification section 18.
+code E0586
+text `User` does not satisfy `Printable`
+text missing method `fn print_me(): string`

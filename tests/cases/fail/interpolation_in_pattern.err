@@ -1,0 +1,3 @@
+# Grammar NOTE 15.3.
+code E0475
+text a string pattern may not contain an interpolation

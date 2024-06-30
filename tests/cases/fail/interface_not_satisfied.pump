@@ -1,0 +1,16 @@
+// Specification section 18: `implements` states a claim the checker verifies.
+import io
+
+interface Printable {
+    fn print_me(): string
+}
+
+struct User {
+    name: string
+}
+
+implements User: Printable
+
+fn main() {
+    io.println(User { name: "x" }.name)
+}
