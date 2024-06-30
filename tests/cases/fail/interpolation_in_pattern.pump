@@ -1,0 +1,11 @@
+// Grammar NOTE 15.3: a pattern's string literal cannot interpolate.
+import io
+
+fn main() {
+    let name = "a"
+    let text = "a"
+    match text {
+        "{name}" => io.println("match")
+        _ => io.println("other")
+    }
+}

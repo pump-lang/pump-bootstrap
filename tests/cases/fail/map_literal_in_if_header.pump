@@ -1,0 +1,9 @@
+// Grammar 14.13: no brace-opening literal may start the header of an `if`.
+import io
+
+fn main() {
+    let table: [string: int] = { "a": 1 }
+    if table == { "a": 1 } {
+        io.println("same")
+    }
+}
