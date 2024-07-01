@@ -116,7 +116,7 @@ fn binary_entry(kind: TokenKind) -> Option<BinaryEntry> {
     })
 }
 
-fn assignment2(kind: TokenKind) -> Option<AssignOp> {
+fn assignment_op(kind: TokenKind) -> Option<AssignOp> {
     let op = match kind {
         TokenKind::Eq => AssignOp::Assign,
         TokenKind::PlusEq => AssignOp::Add,
@@ -1684,7 +1684,7 @@ impl Parser<'_> {
         }
 
         let target = self.parse_catch_expression();
-        if let Some(op) = assignment2(self.kind()) {
+        if let Some(op) = assignment_op(self.kind()) {
             self.advance();
             if !target.is_lvalue() {
                 self.report(
@@ -1830,7 +1830,7 @@ impl Parser<'_> {
 impl Parser<'_> {
     fn parse_expression(&mut self) -> Expr {
         let expr = self.parse_catch_expression();
-        if assignment2(self.kind()).is_some() {
+        if assignment_op(self.kind()).is_some() {
             let operator = self.advance();
             self.report(
                 CompileError::new(ErrorCode::AssignmentInExpression, operator.span)
