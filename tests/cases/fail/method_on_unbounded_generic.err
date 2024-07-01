@@ -1,0 +1,3 @@
+# Decision D-21.
+code E0587
+text `T` has no interface bounds, so `.to_string` is not available on it

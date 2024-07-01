@@ -1,0 +1,11 @@
+// Decision D-21: a generic parameter must be bounded before its methods are
+// reachable.
+import io
+
+fn label<T>(value: T): string {
+    return value.to_string()
+}
+
+fn main() {
+    io.println(label(3))
+}

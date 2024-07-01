@@ -1,0 +1,6 @@
+// Grammar 1.1: the entry file must declare `fn main()`.
+import io
+
+fn start() {
+    io.println("hello")
+}
