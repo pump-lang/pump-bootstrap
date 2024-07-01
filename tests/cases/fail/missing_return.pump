@@ -1,0 +1,12 @@
+// Specification section 5: Pump has no implicit return.
+import io
+
+fn max(a: int, b: int): int {
+    if a > b {
+        return a
+    }
+}
+
+fn main() {
+    io.println(max(1, 2))
+}

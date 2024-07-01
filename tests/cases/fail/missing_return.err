@@ -1,0 +1,4 @@
+# Specification section 5.
+code E0579
+text `max` must return `int` on every path
+text Pump has no implicit return
