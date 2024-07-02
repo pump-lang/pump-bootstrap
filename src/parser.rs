@@ -137,7 +137,7 @@ fn range_is_inclusive(kind: TokenKind) -> Option<bool> {
     }
 }
 
-fn do_expression(kind: TokenKind) -> bool {
+fn begins_expression(kind: TokenKind) -> bool {
     use TokenKind::*;
     matches!(
         kind,
@@ -1667,7 +1667,7 @@ impl Parser<'_> {
 
     fn parse_expression_statement(&mut self) -> Option<Stmt> {
         let start = self.span();
-        if !do_expression(self.kind()) {
+        if !begins_expression(self.kind()) {
             let found = self.kind();
             if !self.report_reserved(start) {
                 self.report(
