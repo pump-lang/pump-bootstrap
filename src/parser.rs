@@ -3191,7 +3191,10 @@ fn main() {
             codes("enum Color {\n    Red()\n}\n"),
             vec![ErrorCode::EmptyVariantPayload]
         );
-        assert_eq!( codes("enum Nothing {\n}\n"), vec![ErrorCode::EnumWithoutVariants] );
+        assert_eq!(
+            codes("enum Nothing {\n}\n"),
+            vec![ErrorCode::EnumWithoutVariants]
+        );
     }
 
     #[test]
