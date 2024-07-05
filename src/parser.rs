@@ -160,7 +160,7 @@ fn begins_expression(kind: TokenKind) -> bool {
     )
 }
 
-fn is_ter(kind: TokenKind) -> bool {
+fn is_terminator(kind: TokenKind) -> bool {
     matches!(kind, TokenKind::Terminator | TokenKind::Semicolon)
 }
 
@@ -489,7 +489,7 @@ impl<'a> Parser<'a> {
 
     fn eat_terminators(&mut self) -> bool {
         let mut ate = false;
-        while is_ter(self.kind()) {
+        while is_terminator(self.kind()) {
             self.advance();
             ate = true;
         }
@@ -498,7 +498,7 @@ impl<'a> Parser<'a> {
 
     fn eat_composite_separators(&mut self) -> bool {
         let mut ate = false;
-        while self.at(TokenKind::Comma) || is_ter(self.kind()) {
+        while self.at(TokenKind::Comma) || is_terminator(self.kind()) {
             self.advance();
             ate = true;
         }
@@ -569,7 +569,7 @@ impl<'a> Parser<'a> {
                     depth -= 1;
                     self.advance();
                 }
-                kind if depth == 0 && is_ter(kind) => {
+                kind if depth == 0 && is_terminator(kind) => {
                     self.advance();
                     return;
                 }
@@ -700,7 +700,7 @@ impl Parser<'_> {
         let mut path = vec![self.expect_ident()?];
         while self.at(TokenKind::Backslash) {
             let backslash = self.advance();
-            if is_ter(self.kind()) || self.at(TokenKind::Eof) {
+            if is_terminator(self.kind()) || self.at(TokenKind::Eof) {
                 self.report(
                     CompileError::new(ErrorCode::MultilineImportPath, backslash.span)
                         .with_caret("the path continues after this backslash"),
@@ -824,7 +824,7 @@ impl Parser<'_> {
             if self.eat(TokenKind::Comma).is_none() {
                 break;
             }
-            if is_ter(self.kind()) || self.at(TokenKind::Eof) {
+            if is_terminator(self.kind()) || self.at(TokenKind::Eof) {
                 break;
             }
             if self.cursor() == before {
@@ -1660,7 +1660,7 @@ impl Parser<'_> {
     }
 
     fn at_statement_end(&self) -> bool {
-        is_ter(self.kind())
+        is_terminator(self.kind())
             || matches!(self.kind(), TokenKind::RBrace | TokenKind::Eof)
             || (self.match_arm && self.at(TokenKind::Comma))
     }
@@ -2113,7 +2113,7 @@ impl Parser<'_> {
             return false;
         }
         let mut offset = brace_offset + 1;
-        while is_ter(self.kind_nth(offset)) {
+        while is_terminator(self.kind_nth(offset)) {
             offset += 1;
         }
         self.kind_nth(offset) == TokenKind::Ident && self.kind_nth(offset + 1) == TokenKind::Colon
