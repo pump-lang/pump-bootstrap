@@ -1,0 +1,7 @@
+// Grammar 10.2.7: module paths resolve relative to the entry file's directory.
+import io
+import net\smtp
+
+fn main() {
+    io.println(smtp.send())
+}

@@ -1,0 +1,4 @@
+# Grammar 10.2.7: the help names the path that was searched.
+code E0511
+text no source file for module `net\smtp`
+text smtp.pump

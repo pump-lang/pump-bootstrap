@@ -1,0 +1,12 @@
+// Specification section 11: every field needs an initialiser.
+import io
+
+struct User {
+    name: string
+    age: int
+}
+
+fn main() {
+    let user = User { name: "x" }
+    io.println(user.name)
+}

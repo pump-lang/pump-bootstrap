@@ -1,0 +1,11 @@
+# Grammar 16.10 / decision D-25. The rejection itself is correct: the region
+# rule says an assignment anywhere in the guarded region defeats narrowing.
+#
+# The message is not. The program already tests `cursor != null`, so a help
+# telling it to "test it with `!= null`" is advice the code has taken; nothing
+# in the diagnostic mentions the assignment that actually defeated the
+# narrowing, or the rule it comes from. Every other diagnostic in this compiler
+# cites the rule behind it, and this is the language's sharpest edge.
+code E0503
+text `Node?` may be absent, so `.value` is not available
+absent test it with `!= null`
