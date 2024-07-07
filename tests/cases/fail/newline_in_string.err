@@ -1,0 +1,5 @@
+# Edge case E-27: string scanning and terminator insertion never interact,
+# because a raw newline inside a string literal is a lexical error.
+code E0420
+text a string literal may not contain a raw newline
+text write `\n`, or split the text and join the parts with `+`

@@ -1,0 +1,6 @@
+// Edge case E-27: a newline may not appear inside a string literal.
+import io
+
+fn main() {
+    io.println("open
+}

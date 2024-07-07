@@ -1,0 +1,7 @@
+// Edge case E-23: optionals do not nest.
+import io
+
+fn main() {
+    let value: int?? = 1
+    io.println(value.or(0))
+}

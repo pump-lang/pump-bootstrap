@@ -1,0 +1,3 @@
+# Edge case E-23.
+code E0566
+text an optional of an optional has no extra state to represent
