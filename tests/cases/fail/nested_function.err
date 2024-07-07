@@ -1,0 +1,4 @@
+# Edge case E-41.
+code E0470
+text nested named functions are not permitted
+text write `let helper = fn(...) { ... }` instead

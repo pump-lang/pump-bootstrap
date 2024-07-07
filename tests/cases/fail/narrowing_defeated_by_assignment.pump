@@ -1,0 +1,24 @@
+// Grammar 16.10 and decision D-25: narrowing covers a whole region, and an
+// assignment to the narrowed identifier anywhere in that region defeats it.
+// That rules out the idiomatic linked-list walk, which has to copy the
+// narrowed value into a fresh local instead.
+import io
+
+struct Node {
+    value: int
+    next: Node?
+}
+
+fn total(head: Node?): int {
+    let sum = 0
+    let cursor = head
+    while cursor != null {
+        sum += cursor.value
+        cursor = cursor.next
+    }
+    return sum
+}
+
+fn main() {
+    io.println(total(Node { value: 1, next: null }))
+}

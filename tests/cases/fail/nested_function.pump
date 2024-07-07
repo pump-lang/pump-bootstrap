@@ -1,0 +1,10 @@
+// Edge case E-41: no nested `fn` declarations; a `fn` inside a block is a
+// closure expression, which has to be bound.
+import io
+
+fn main() {
+    fn helper(): int {
+        return 1
+    }
+    io.println(helper())
+}
