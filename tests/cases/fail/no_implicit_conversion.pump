@@ -1,0 +1,8 @@
+// Decision D-7: there is no implicit numeric conversion.
+import io
+
+fn main() {
+    let whole = 3
+    let fraction = 0.5
+    io.println(whole + fraction)
+}
