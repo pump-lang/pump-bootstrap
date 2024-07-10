@@ -1,0 +1,5 @@
+# Grammar NOTE 13.4.4: a match must cover every value, and the diagnostic
+# names one of the values it misses.
+code E0576
+text does not cover every value
+text `Color.Blue` is not covered

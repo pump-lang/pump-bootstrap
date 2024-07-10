@@ -1,0 +1,3 @@
+# Grammar NOTE 12.6.1.
+code E0585
+text this cannot be evaluated at compile time

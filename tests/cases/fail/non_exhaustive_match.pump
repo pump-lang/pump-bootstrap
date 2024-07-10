@@ -1,0 +1,19 @@
+// Grammar NOTE 13.4.4: every `match` must be exhaustive.
+import io
+
+enum Color {
+    Red
+    Green
+    Blue
+}
+
+fn name_of(color: Color): string {
+    match color {
+        Color.Red => return "red"
+        Color.Green => return "green"
+    }
+}
+
+fn main() {
+    io.println(name_of(Color.Blue))
+}

@@ -1,0 +1,7 @@
+// Edge case E-43: identifiers are ASCII.
+import io
+
+fn main() {
+    let tuổi = 18
+    io.println(tuổi)
+}
