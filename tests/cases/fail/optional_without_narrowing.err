@@ -1,0 +1,4 @@
+# Specification section 15: reaching into a `T?` without checking it first.
+code E0503
+text `User?` may be absent, so `.name` is not available
+text test it with `!= null`

@@ -1,0 +1,14 @@
+// Grammar NOTE 15.5: every alternative of an or-pattern binds the same names.
+import io
+
+enum Outcome {
+    Ok(int)
+    Err(string)
+}
+
+fn main() {
+    let outcome = Outcome.Ok(1)
+    match outcome {
+        Outcome.Ok(value) | Outcome.Err(text) => io.println("got something")
+    }
+}

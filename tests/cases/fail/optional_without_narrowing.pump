@@ -1,0 +1,19 @@
+// Specification section 15: an optional has to be checked before its contents
+// are reachable.
+import io
+
+struct User {
+    name: string
+}
+
+fn find(id: int): User? {
+    if id == 1 {
+        return User { name: "Minh" }
+    }
+    return null
+}
+
+fn main() {
+    let user = find(1)
+    io.println(user.name)
+}

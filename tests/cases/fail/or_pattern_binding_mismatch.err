@@ -1,0 +1,3 @@
+# Grammar NOTE 15.5.
+code E0578
+text every alternative of an or-pattern must bind the same names at the same types
