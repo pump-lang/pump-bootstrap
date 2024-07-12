@@ -1,0 +1,4 @@
+# Specification section 20, applied to a struct field.
+code E0509
+text the field `contents` of `Box` is private to module `secrets\vault`
+text declare it `pub`

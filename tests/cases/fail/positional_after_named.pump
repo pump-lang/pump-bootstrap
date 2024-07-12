@@ -1,0 +1,10 @@
+// Decision D-27: named arguments come last.
+import io
+
+fn connect(host: string, port: int = 80): string {
+    return "{host}:{port}"
+}
+
+fn main() {
+    io.println(connect(host: "localhost", 8080))
+}
