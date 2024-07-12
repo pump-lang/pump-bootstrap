@@ -1,0 +1,14 @@
+// Grammar NOTE 12.6.1: a default value cannot be a call.
+import io
+
+fn now(): int {
+    return 7
+}
+
+fn stamp(label: string, at: int = now()): string {
+    return "{label}@{at}"
+}
+
+fn main() {
+    io.println(stamp("x"))
+}

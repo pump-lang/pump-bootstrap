@@ -1,0 +1,7 @@
+// Edge case E-31: Pump has no one-tuples.
+import io
+
+fn main() {
+    let lonely = (1,)
+    io.println(lonely.0)
+}
