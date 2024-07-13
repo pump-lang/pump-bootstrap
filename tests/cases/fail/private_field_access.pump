@@ -1,0 +1,9 @@
+// Specification section 20 applied to a struct field.
+import io
+import secrets\vault
+
+fn main() {
+    let box = vault.make()
+    io.println(box.label)
+    io.println(box.contents)
+}

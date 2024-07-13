@@ -1,0 +1,19 @@
+// Specification section 16: `!` propagates into the enclosing function, which
+// must therefore declare a failable return type.
+import io
+
+fn read(path: string): string! {
+    if path == "" {
+        fail "empty path"
+    }
+    return path
+}
+
+fn load(): string {
+    let data = read("data.txt")!
+    return data
+}
+
+fn main() {
+    io.println(load())
+}

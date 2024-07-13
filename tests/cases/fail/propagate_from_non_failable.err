@@ -1,0 +1,4 @@
+# Specification section 16: `!` needs a failable enclosing function.
+code E0570
+text propagates the failure out of a function that cannot fail
+text declare the return type as `string!`
