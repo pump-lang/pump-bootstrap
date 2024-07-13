@@ -1,0 +1,8 @@
+# Grammar NOTE 14.18. The empty form `let ids: set<int> = {}` is legal, so this
+# is the spelling inconsistency the grammar records: one clear error, naming
+# the form that works, rather than a cascade.
+code E0451
+text a map entry is written `key: value`
+text for a set, write `set{...}`
+absent E0550
+absent E0561

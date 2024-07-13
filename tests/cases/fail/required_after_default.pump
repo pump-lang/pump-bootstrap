@@ -1,0 +1,10 @@
+// Grammar 12.1: a required parameter cannot follow a defaulted one.
+import io
+
+fn connect(host: string = "localhost", port: int): string {
+    return "{host}:{port}"
+}
+
+fn main() {
+    io.println(connect(port: 80))
+}
