@@ -1,0 +1,4 @@
+# Decision D-8.
+code E0562
+text a `string` is UTF-8, so a byte offset is not a character
+text use `s.byte_at(i)`

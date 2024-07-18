@@ -1,0 +1,8 @@
+// Decision D-8: a string is UTF-8, so `s[i]` has no meaning; the byte and
+// character forms are separate methods.
+import io
+
+fn main() {
+    let text = "hello"
+    io.println(text[0])
+}

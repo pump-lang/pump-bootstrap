@@ -1,0 +1,8 @@
+// Decision D-5: an expression statement must contain a call.
+import io
+
+fn main() {
+    let a = 1
+    a + 1
+    io.println(a)
+}
