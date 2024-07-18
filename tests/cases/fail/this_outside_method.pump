@@ -1,0 +1,10 @@
+// Specification section 12: `this` is the method receiver.
+import io
+
+fn helper(): string {
+    return this.name
+}
+
+fn main() {
+    io.println(helper())
+}

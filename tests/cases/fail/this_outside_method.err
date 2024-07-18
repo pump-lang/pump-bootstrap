@@ -1,0 +1,3 @@
+# Specification section 12.
+code E0510
+text `this` is only bound inside a method body

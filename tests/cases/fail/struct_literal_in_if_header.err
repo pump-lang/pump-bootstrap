@@ -1,0 +1,4 @@
+# Grammar 14.13: a struct literal's `{` would be read as the block.
+code E0454
+text struct literals are not allowed in the header of if / while / for / match
+text wrap it in parentheses

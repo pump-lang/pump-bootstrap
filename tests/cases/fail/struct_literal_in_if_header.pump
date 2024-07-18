@@ -1,0 +1,14 @@
+// Grammar 14.13 and decision P-2: a bare struct literal may not open the
+// header of an `if`, because its `{` is the block.
+import io
+
+struct User {
+    name: string
+}
+
+fn main() {
+    let user = User { name: "x" }
+    if user == User { name: "x" } {
+        io.println("same")
+    }
+}
