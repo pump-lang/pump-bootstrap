@@ -1,0 +1,4 @@
+# Decision D-5.
+code E0459
+text this expression has no effect
+text only an expression containing a call may stand as a statement

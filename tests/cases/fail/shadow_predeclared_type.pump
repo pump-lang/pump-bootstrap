@@ -1,0 +1,7 @@
+// Edge case E-38: the predeclared type names are not shadowable.
+import io
+
+fn main() {
+    let int = 3
+    io.println(int)
+}

@@ -1,0 +1,8 @@
+// Grammar NOTE 14.18: a non-empty set literal is spelled `set{...}`. Bare
+// braces are a map literal, which is why the empty form needs an annotation.
+import io
+
+fn main() {
+    let ids: set<int> = {7, 8, 9}
+    io.println(ids.length)
+}

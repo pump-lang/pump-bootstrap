@@ -1,0 +1,3 @@
+# Edge case E-38.
+code E0507
+text `int` is predeclared and cannot be shadowed
