@@ -1,0 +1,4 @@
+# Decision D-22.
+code E0472
+text module-level state must be declared with `const`
+text write `const` instead

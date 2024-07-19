@@ -1,0 +1,8 @@
+// Decision D-22: module state is `const`; there is no top-level `let`.
+import io
+
+let counter = 0
+
+fn main() {
+    io.println(counter)
+}
