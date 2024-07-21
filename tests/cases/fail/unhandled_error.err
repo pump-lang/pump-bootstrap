@@ -1,0 +1,4 @@
+# Decision D-14: a failable result is not a value.
+code E0569
+text this call can fail, so its `string` is not available yet
+text propagate it with `!`, or handle it with `catch`

@@ -1,0 +1,3 @@
+# Specification section 3: no implicit conversion.
+code E0550
+text expects `int`, but this is `string`

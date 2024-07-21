@@ -1,0 +1,7 @@
+// Specification section 3: there is no implicit conversion between types.
+import io
+
+fn main() {
+    let age: int = "eighteen"
+    io.println(age)
+}

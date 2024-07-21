@@ -1,0 +1,7 @@
+// Grammar 9.6: a tuple index is checked against the tuple's arity.
+import io
+
+fn main() {
+    let pair = (1, 2)
+    io.println(pair.5)
+}
