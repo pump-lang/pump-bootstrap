@@ -1,0 +1,6 @@
+// Grammar 16: an unresolved name.
+import io
+
+fn main() {
+    io.println(mystery)
+}

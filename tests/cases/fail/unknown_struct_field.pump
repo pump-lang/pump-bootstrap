@@ -1,0 +1,11 @@
+// Specification section 11: a literal cannot invent a field.
+import io
+
+struct User {
+    name: string
+}
+
+fn main() {
+    let user = User { name: "x", nickname: "y" }
+    io.println(user.name)
+}
