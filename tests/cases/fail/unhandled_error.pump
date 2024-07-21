@@ -1,0 +1,15 @@
+// Decision D-14: a failable call has to be consumed by `!` or `catch`; the
+// failable type is not a value type.
+import io
+
+fn read(path: string): string! {
+    if path == "" {
+        fail "empty"
+    }
+    return path
+}
+
+fn main() {
+    let data = read("a.txt")
+    io.println(data)
+}

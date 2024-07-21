@@ -1,0 +1,4 @@
+# Specification section 11.
+code E0503
+text `User` has no field or method `nickname`
+text its fields are `name`

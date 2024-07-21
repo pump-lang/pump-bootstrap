@@ -1,0 +1,11 @@
+// Specification section 11.
+import io
+
+struct User {
+    name: string
+}
+
+fn main() {
+    let user = User { name: "x" }
+    io.println(user.nickname)
+}
