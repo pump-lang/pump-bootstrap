@@ -1,0 +1,10 @@
+// Grammar 12.1: a variadic parameter must be last.
+import io
+
+fn log(values: ...int, label: string): int {
+    return values.length
+}
+
+fn main() {
+    io.println(log(1, 2, label: "x"))
+}

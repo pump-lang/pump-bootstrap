@@ -1,0 +1,4 @@
+# Specification section 20: private by default.
+code E0509
+text the constant `COMBINATION` is private to module `secrets\vault`
+text declare it `pub`

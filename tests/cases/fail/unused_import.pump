@@ -1,0 +1,7 @@
+// Edge case E-39: an unused import is an error.
+import io
+import strings
+
+fn main() {
+    io.println("hello")
+}
