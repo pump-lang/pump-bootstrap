@@ -1,0 +1,16 @@
+// Grammar NOTE 13.4.5: an arm covered by an earlier one is an error.
+import io
+
+enum Color {
+    Red
+    Green
+}
+
+fn main() {
+    let color = Color.Red
+    match color {
+        Color.Red => io.println("red")
+        _ => io.println("other")
+        Color.Green => io.println("green")
+    }
+}

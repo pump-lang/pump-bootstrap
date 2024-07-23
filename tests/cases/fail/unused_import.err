@@ -1,0 +1,3 @@
+# Edge case E-39: unused imports are errors, unused locals only warnings.
+code E0508
+text `strings` is imported but never used
