@@ -1,0 +1,9 @@
+// Specification section 20: a name without `pub` does not cross a module
+// boundary.
+import io
+import secrets\vault
+
+fn main() {
+    io.println(vault.PUBLIC_NAME)
+    io.println(vault.COMBINATION)
+}

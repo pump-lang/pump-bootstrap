@@ -1,0 +1,5 @@
+# Specification section 5: too few arguments, then too many.
+code E0555
+code E0552
+text which was not supplied
+text `add` takes 2 arguments, but 3 were supplied
