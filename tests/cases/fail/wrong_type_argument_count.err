@@ -1,0 +1,3 @@
+# Specification section 17.
+code E0590
+text `Pair` takes 2 type arguments, but 1 was supplied

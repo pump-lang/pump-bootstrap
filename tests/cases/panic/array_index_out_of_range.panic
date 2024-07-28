@@ -1,0 +1,3 @@
+status 101
+out before
+err pump: panic: index 5 is out of range for a length of 3

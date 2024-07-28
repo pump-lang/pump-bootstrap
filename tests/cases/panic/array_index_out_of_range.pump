@@ -1,0 +1,10 @@
+// Grammar 13.3: an out-of-range index is a runtime panic, not undefined
+// behaviour and not a silent clamp.
+import io
+
+fn main() {
+    let items = [1, 2, 3]
+    io.println("before")
+    io.println(items[5])
+    io.println("after")
+}

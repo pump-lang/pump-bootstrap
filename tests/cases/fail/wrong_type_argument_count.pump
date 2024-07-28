@@ -1,0 +1,13 @@
+// Specification section 17: a generic type takes exactly its declared
+// parameters.
+import io
+
+struct Pair<A, B> {
+    left: A
+    right: B
+}
+
+fn main() {
+    let pair: Pair<int> = Pair { left: 1, right: 2 }
+    io.println(pair.left)
+}
