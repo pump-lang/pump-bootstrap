@@ -1,0 +1,11 @@
+// Decision D-7: only `/0` and `%0` panic; every other arithmetic edge wraps.
+import io
+
+fn divide(a: int, b: int): int {
+    return a / b
+}
+
+fn main() {
+    io.println("before")
+    io.println(divide(1, 0))
+}
