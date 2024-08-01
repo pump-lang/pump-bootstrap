@@ -1,0 +1,5 @@
+# The message should name the key that was missing, the way the array message
+# names the offending index.
+status 101
+out before
+err pump: panic: no such key in the map

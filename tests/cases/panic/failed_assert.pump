@@ -1,0 +1,8 @@
+// The predeclared `assert` (grammar 2.5.1).
+import io
+
+fn main() {
+    io.println("before")
+    assert(1 == 2)
+    io.println("after")
+}

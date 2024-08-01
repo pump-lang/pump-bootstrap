@@ -1,0 +1,8 @@
+// `m[k]` is the panicking form; `m.get(k)` is the total one.
+import io
+
+fn main() {
+    let table: [string: int] = { "a": 1 }
+    io.println("before")
+    io.println(table["missing"])
+}
