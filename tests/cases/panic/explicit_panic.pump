@@ -1,0 +1,7 @@
+// The predeclared `panic` (grammar 2.5.1).
+import io
+
+fn main() {
+    io.println("before")
+    panic("stop here")
+}

@@ -1,0 +1,9 @@
+// Decision D-13: `expect` is the force-unwrap that postfix `?` deliberately
+// is not, and it panics with the caller's own message.
+import io
+
+fn main() {
+    let value: int? = null
+    io.println("before")
+    io.println(value.expect("the configuration must be loaded"))
+}
