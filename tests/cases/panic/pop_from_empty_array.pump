@@ -1,0 +1,11 @@
+// `pop` has no total counterpart, so an empty array is a panic. The message
+// must describe what the caller did, not the index the implementation reached
+// for: `m[k]` and `m.get(k)` are a matched pair, and arrays have only the
+// panicking half.
+import io
+
+fn main() {
+    let items: [int] = []
+    io.println("before")
+    io.println(items.pop())
+}

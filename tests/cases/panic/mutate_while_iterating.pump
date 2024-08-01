@@ -1,0 +1,11 @@
+// Edge case E-36: mutating a collection while iterating it is a runtime panic
+// caught by a modification counter, not silent corruption.
+import io
+
+fn main() {
+    let items = [1, 2, 3]
+    io.println("before")
+    for item in items {
+        items.push(item)
+    }
+}
