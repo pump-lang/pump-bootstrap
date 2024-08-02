@@ -1,0 +1,4 @@
+pub interface Shape {
+    fn area(): float
+    fn name(): string
+}

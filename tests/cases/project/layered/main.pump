@@ -1,0 +1,25 @@
+// A three-module program: an interface declared in one module, a struct in
+// another that satisfies it structurally, and errors crossing the boundary.
+import io
+import shapes
+import store\registry as registry
+
+fn main() {
+    let circle = shapes.Circle { radius: 2.0 }
+    let square = shapes.Square { side: 3.0 }
+
+    io.println(shapes.render(circle))
+    io.println(shapes.render(square))
+
+    let catalogue = registry.empty()
+    registry.add(catalogue, "c", shapes.area(circle))
+    registry.add(catalogue, "s", shapes.area(square))
+
+    io.println(registry.count(catalogue))
+    io.println(registry.lookup(catalogue, "s") catch -1.0)
+    io.println(registry.lookup(catalogue, "missing") catch -1.0)
+
+    for name in registry.names(catalogue) {
+        io.println("{name} -> {registry.lookup(catalogue, name) catch 0.0}")
+    }
+}
