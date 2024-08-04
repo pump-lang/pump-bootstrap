@@ -1,0 +1,14 @@
+pub const STATUS_OK: int = 200
+
+pub struct Request {
+    pub path: string
+    pub method: string
+
+    pub fn line(): string {
+        return "{method} {path}"
+    }
+}
+
+pub fn get(path: string): string {
+    return "{STATUS_OK} GET {path}"
+}

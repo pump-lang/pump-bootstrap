@@ -1,0 +1,23 @@
+// Specification section 19: plain, nested and aliased imports, and section 20:
+// only `pub` names cross a module boundary.
+import io
+import user
+import net\http
+import net\http as web
+
+fn main() {
+    let account = user.make("Minh", 18)
+    io.println(user.describe(account))
+    io.println(account.name)
+    io.println(user.MAX_AGE)
+
+    io.println(http.get("/index"))
+    io.println(web.get("/about"))
+    io.println(http.STATUS_OK)
+
+    // The alias and the last path segment name the same module.
+    io.println(http.STATUS_OK == web.STATUS_OK)
+
+    let request = http.Request { path: "/x", method: "GET" }
+    io.println(request.line())
+}
