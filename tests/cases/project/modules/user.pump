@@ -1,0 +1,26 @@
+pub const MAX_AGE: int = 150
+
+pub struct Account {
+    pub name: string
+    pub age: int
+}
+
+pub fn make(name: string, age: int): Account {
+    return Account { name: name, age: age }
+}
+
+pub fn describe(account: Account): string {
+    return "{account.name} ({account.age}) of at most {MAX_AGE}"
+}
+
+// Private: reachable inside this file only.
+fn clamp(age: int): int {
+    if age > MAX_AGE {
+        return MAX_AGE
+    }
+    return age
+}
+
+pub fn clamped(age: int): int {
+    return clamp(age)
+}
