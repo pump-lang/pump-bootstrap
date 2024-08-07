@@ -1,0 +1,44 @@
+// Specification section 10.
+import io
+
+fn main() {
+    let items = [3, 0, 5, -1, 7]
+    for item in items {
+        if item == 0 {
+            continue
+        }
+
+        if item < 0 {
+            break
+        }
+
+        io.println(item)
+    }
+
+    // `break` and `continue` bind to the innermost loop.
+    for row in 0..3 {
+        for column in 0..3 {
+            if column == 1 {
+                continue
+            }
+            if column == 2 {
+                break
+            }
+            io.print("{row}{column} ")
+        }
+    }
+    io.println("")
+
+    let i = 0
+    while true {
+        i += 1
+        if i % 2 == 0 {
+            continue
+        }
+        if i > 7 {
+            break
+        }
+        io.print("{i} ")
+    }
+    io.println("")
+}

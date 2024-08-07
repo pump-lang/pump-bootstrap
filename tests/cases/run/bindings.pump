@@ -1,0 +1,25 @@
+// Specification section 2: `let` is mutable, `const` is not, and both take an
+// optional type annotation.
+import io
+
+fn main() {
+    let count = 0
+    count = 10
+    count += 1
+    io.println(count)
+
+    const name = "Pump"
+    io.println(name)
+
+    let age: int = 18
+    const greeting: string = "hi"
+    io.println("{greeting} {age}")
+
+    // A nested block may shadow a name from an enclosing one.
+    let value = 1
+    if true {
+        let value = 2
+        io.println(value)
+    }
+    io.println(value)
+}
