@@ -1,0 +1,62 @@
+// Edge cases E-9 to E-11: after `catch`, `{` always begins a handler block, a
+// map or struct default must be parenthesised, and a binder followed by a
+// newline is not the binder form.
+import io
+
+struct Config {
+    name: string
+}
+
+fn load(ok: bool): [string: int]! {
+    if ok {
+        return { "a": 1 }
+    }
+    fail "no table"
+}
+
+fn read_config(ok: bool): Config! {
+    if ok {
+        return Config { name: "real" }
+    }
+    fail "no config"
+}
+
+fn count(ok: bool): int {
+    // E-9: an empty map default has to be parenthesised, because `catch {`
+    // opens a handler.
+    let table = load(ok) catch ({})
+    return table.length
+}
+
+fn name_of(ok: bool): string {
+    // E-10: a struct-literal default has to be parenthesised too, otherwise
+    // `catch Config` would read as the binder form.
+    let config = read_config(ok) catch (Config { name: "fallback" })
+    return config.name
+}
+
+fn handled(ok: bool): int {
+    // The handler-block form, which must diverge.
+    let table = load(ok) catch {
+        return -1
+    }
+    return table.length
+}
+
+fn named(ok: bool): string {
+    let table = load(ok) catch error {
+        return error.message()
+    }
+    return "{table.length} entries"
+}
+
+fn main() {
+    io.println(count(true))
+    io.println(count(false))
+    io.println(name_of(true))
+    io.println(name_of(false))
+    io.println(handled(true))
+    io.println(handled(false))
+    io.println(named(true))
+    io.println(named(false))
+}
