@@ -1,0 +1,26 @@
+// Specification section 3: char is one Unicode scalar value, string is
+// immutable UTF-8.
+import io
+
+fn main() {
+    let letter = 'a'
+    let newline = '\n'
+    let quote = '\''
+    io.println(letter)
+    io.println(int(newline))
+    io.println(quote)
+
+    let text = "hello"
+    io.println(text + " world")
+    io.println(text.length)
+    io.println(text.char_count())
+    io.println(text.slice(1, 4))
+
+    let unicode = "xin chào"
+    io.println(unicode)
+    io.println(unicode.char_count())
+    io.println(unicode.length)
+
+    let escaped = "tab:\tquote:\"backslash:\\"
+    io.println(escaped)
+}

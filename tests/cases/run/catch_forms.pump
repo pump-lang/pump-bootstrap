@@ -1,0 +1,10 @@
+// Decision D-17: `catch` has three forms - a default expression, a binder,
+// and a block that must diverge.
+import io
+
+fn parse(text: string): int! {
+    if text == "42" {
+        return 42
+    }
+    fail "cannot parse `{text}`"
+}
