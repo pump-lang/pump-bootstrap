@@ -1,0 +1,13 @@
+// Specification sections 22 and 23: closures are `fn` expressions with
+// explicit types (decision D-30), and they capture the enclosing scope.
+import io
+
+fn apply(value: int, transform: fn(int): int): int {
+    return transform(value)
+}
+
+fn make_adder(step: int): fn(int): int {
+    return fn(value: int): int {
+        return value + step
+    }
+}

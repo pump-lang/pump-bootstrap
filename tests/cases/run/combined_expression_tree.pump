@@ -1,0 +1,29 @@
+// A recursive enum evaluated with a match, an error path through `fail` and
+// `!`, and a generic helper reused for both sides.
+import io
+
+enum Expr {
+    Number(int)
+    Add(Expr, Expr)
+    Sub(Expr, Expr)
+    Mul(Expr, Expr)
+    Div(Expr, Expr)
+    Neg(Expr)
+}
+
+fn evaluate(expression: Expr): int! {
+    match expression {
+        Expr.Number(value) => return value
+        Expr.Add(left, right) => return evaluate(left)! + evaluate(right)!
+        Expr.Sub(left, right) => return evaluate(left)! - evaluate(right)!
+        Expr.Mul(left, right) => return evaluate(left)! * evaluate(right)!
+        Expr.Div(left, right) => {
+            let divisor = evaluate(right)!
+            if divisor == 0 {
+                fail "division by zero"
+            }
+            return evaluate(left)! / divisor
+        }
+        Expr.Neg(inner) => return -evaluate(inner)!
+    }
+}
