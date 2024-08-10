@@ -1,0 +1,4 @@
+// Several features at once: structs with methods, an enum with payloads, an
+// exhaustive match, optionals, maps, sorting through closures, and a failable
+// lookup.
+import io
