@@ -1,0 +1,47 @@
+// Generics, interfaces, closures and optionals composed into one small
+// pipeline: a generic sequence type whose operations take function values.
+import io
+
+interface Describable {
+    fn describe(): string
+}
+
+struct Sequence<T> {
+    values: [T]
+
+    fn length(): int {
+        return values.length
+    }
+
+    fn add(value: T) {
+        values.push(value)
+    }
+
+    fn at(index: int): T? {
+        if index < 0 {
+            return null
+        }
+        if index >= values.length {
+            return null
+        }
+        return values[index]
+    }
+
+    fn fold(seed: int, step: fn(int, T): int): int {
+        let accumulator = seed
+        for value in values {
+            accumulator = step(accumulator, value)
+        }
+        return accumulator
+    }
+
+    fn keep(predicate: fn(T): bool): Sequence<T> {
+        let kept: [T] = []
+        for value in values {
+            if predicate(value) {
+                kept.push(value)
+            }
+        }
+        return Sequence { values: kept }
+    }
+}

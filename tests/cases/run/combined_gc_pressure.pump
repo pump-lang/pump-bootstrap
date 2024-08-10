@@ -1,0 +1,18 @@
+// Allocation-heavy work, so the collector runs during a program that also
+// keeps live data across it. Every number below is deterministic.
+import io
+
+struct Node {
+    value: int
+    next: Node?
+}
+
+fn build(length: int): Node? {
+    let head: Node? = null
+    let i = length
+    while i > 0 {
+        head = Node { value: i, next: head }
+        i -= 1
+    }
+    return head
+}
