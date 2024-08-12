@@ -1,0 +1,16 @@
+// Specification section 24: the assignment operators.
+import io
+
+fn main() {
+    let n = 20
+    n += 5
+    io.println(n)
+    n -= 3
+    io.println(n)
+    n *= 2
+    io.println(n)
+    n /= 4
+    io.println(n)
+    n %= 7
+    io.println(n)
+}

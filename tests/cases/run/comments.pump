@@ -1,0 +1,22 @@
+// Specification section 25, with the nesting rule from decision D-11.
+import io
+
+/*
+   A block comment.
+   /* Block comments nest, so commenting out a region that already has
+      comments is safe. */
+   Still inside the outer comment.
+*/
+
+// A line comment before a declaration.
+fn value(): int { // trailing comment
+    /* leading */ return 1 /* trailing */
+}
+
+fn main() {
+    io.println(value()) // and here
+    /* a comment between statements */
+    io.println("done")
+    // A comment containing what looks like code: io.println("nope")
+    // A comment containing an unterminated string: "
+}
