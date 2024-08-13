@@ -1,0 +1,46 @@
+// Specification section 9: iterating each collection kind.
+import io
+
+fn main() {
+    let items = [10, 20, 30]
+    for item in items {
+        io.print("{item} ")
+    }
+    io.println("")
+
+    let names: [string: int] = { "a": 1, "b": 2 }
+    for key in names.keys() {
+        io.print("{key} ")
+    }
+    io.println("")
+
+    let ids = set{5, 6}
+    for id in ids {
+        io.print("{id} ")
+    }
+    io.println("")
+
+    // A string iterates by character, and `chars()` gives the same sequence
+    // as an array.
+    let text = "chào"
+    for letter in text {
+        io.print("[{letter}]")
+    }
+    io.println("")
+    for letter in text.chars() {
+        io.print("[{letter}]")
+    }
+    io.println("")
+
+    // Nested loops.
+    for row in 0..3 {
+        for column in 0..3 {
+            if row == column {
+                io.print("\\")
+            } else {
+                io.print(".")
+            }
+        }
+        io.println("")
+    }
+}

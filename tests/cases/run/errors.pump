@@ -1,0 +1,21 @@
+// Specification section 16 with decisions D-14, D-15 and D-17: `T!` on the
+// return type, `fail` to raise, postfix `!` to propagate.
+import io
+
+fn parse_digit(text: string): int! {
+    if text == "one" {
+        return 1
+    }
+    if text == "two" {
+        return 2
+    }
+    fail "not a digit: {text}"
+}
+
+fn add_digits(a: string, b: string): int! {
+    let left = parse_digit(a)!
+    let right = parse_digit(b)!
+    return left + right
+}
+
+// A failable function that returns nothing is spelled `void!` (edge case E-24).
