@@ -1,0 +1,14 @@
+// Specification section 13: a plain enum and one carrying payloads.
+import io
+
+enum Color {
+    Red
+    Green
+    Blue
+}
+
+enum Shape {
+    Circle(float)
+    Rect(float, float)
+    Empty
+}

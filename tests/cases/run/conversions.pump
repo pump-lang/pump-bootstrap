@@ -1,0 +1,25 @@
+// Grammar 2.5.2: a primitive type name in value position is a conversion.
+import io
+
+fn main() {
+    io.println(string(42))
+    io.println(string(3.5))
+    io.println(string(true))
+    io.println(string('x'))
+
+    io.println(int(3.9))
+    io.println(int('A'))
+    io.println(int(7))
+
+    io.println(float(3))
+    io.println(uint(3))
+
+    io.println(char(65))
+
+    // `to_string` on every primitive, which is what `Stringable` requires.
+    io.println((42).to_string())
+    io.println(true.to_string())
+    io.println('z'.to_string())
+    io.println(2.5.to_string())
+    io.println("already".to_string())
+}
