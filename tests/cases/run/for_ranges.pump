@@ -1,0 +1,40 @@
+// Specification section 9: `for ... in`, exclusive and inclusive ranges.
+import io
+
+fn main() {
+    for i in 0..5 {
+        io.print("{i} ")
+    }
+    io.println("")
+
+    for i in 0..=5 {
+        io.print("{i} ")
+    }
+    io.println("")
+
+    // An empty range runs zero times.
+    for i in 3..3 {
+        io.println("never")
+    }
+
+    // Range endpoints are ordinary expressions, and `..` binds looser than
+    // arithmetic (edge case E-21).
+    let n = 4
+    for i in 1..n - 1 {
+        io.print("{i} ")
+    }
+    io.println("")
+
+    let total = 0
+    for i in 1..=10 {
+        total += i
+    }
+    io.println(total)
+
+    // The binding is scoped to the loop and `_` discards it.
+    let ticks = 0
+    for _ in 0..3 {
+        ticks += 1
+    }
+    io.println(ticks)
+}
