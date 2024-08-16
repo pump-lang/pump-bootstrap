@@ -1,0 +1,10 @@
+// Specification section 5: `fn`, explicit returns, no implicit tail return.
+import io
+
+fn add(a: int, b: int): int {
+    return a + b
+}
+
+fn hello(name: string) {
+    io.println("Hello " + name)
+}

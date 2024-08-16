@@ -1,0 +1,25 @@
+// Specification section 17: generic functions, structs and enums, with the
+// type argument inferred at the call site.
+import io
+
+fn first<T>(items: [T]): T? {
+    if items.length == 0 {
+        return null
+    }
+
+    return items[0]
+}
+
+fn swap<A, B>(pair: (A, B)): (B, A) {
+    return (pair.1, pair.0)
+}
+
+fn count_matching<T>(items: [T], wanted: T): int {
+    let total = 0
+    for item in items {
+        if item == wanted {
+            total += 1
+        }
+    }
+    return total
+}
