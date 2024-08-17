@@ -1,0 +1,12 @@
+// Specification section 1: the shape of a program.
+import io
+
+const VERSION: string = "0.1"
+
+fn main() {
+    let name: string = "Minh"
+    io.println("Hello " + name)
+    io.println("pump " + VERSION)
+
+    return
+}
