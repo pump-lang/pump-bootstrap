@@ -1,0 +1,37 @@
+// Specification section 4: maps, and decision D-26 on iteration order.
+import io
+
+fn main() {
+    let ages: [string: int] = {}
+    ages.insert("minh", 18)
+    ages.insert("an", 21)
+    io.println(ages.length)
+    io.println(ages["minh"])
+    io.println(ages.has("an"))
+    io.println(ages.has("nobody"))
+
+    let literal: [string: int] = { "one": 1, "two": 2 }
+    io.println(literal["two"])
+
+    // `m[k]` panics on a missing key; `m.get(k)` is the total form.
+    let missing = literal.get("three")
+    io.println(missing == null)
+    let present = literal.get("one")
+    if present != null {
+        io.println(present)
+    }
+
+    io.println(literal.remove("one"))
+    io.println(literal.remove("one"))
+    io.println(literal.length)
+
+    // Iteration order is insertion order.
+    for key in ages.keys() {
+        io.print(key + " ")
+    }
+    io.println("")
+    for value in ages.values() {
+        io.print("{value} ")
+    }
+    io.println("")
+}
