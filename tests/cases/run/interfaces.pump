@@ -1,0 +1,24 @@
+// Specification section 18: interfaces are structural, and `implements` is an
+// optional explicit conformance check.
+import io
+
+interface Named {
+    fn label(): string
+}
+
+interface Sized {
+    fn size(): int
+}
+
+struct File {
+    path: string
+    bytes: int
+
+    fn label(): string {
+        return "file {path}"
+    }
+
+    fn size(): int {
+        return bytes
+    }
+}

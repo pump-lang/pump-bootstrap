@@ -1,0 +1,39 @@
+// Decisions D-6 and D-7: 64-bit integers that wrap, truncating division,
+// and shifts that do not mask their count.
+import io
+
+fn main() {
+    let biggest = 9223372036854775807
+    io.println(biggest)
+    io.println(biggest + 1)
+
+    let smallest = -9223372036854775808
+    io.println(smallest)
+    io.println(smallest - 1)
+
+    // Truncation is toward zero.
+    io.println(-7 / 2)
+    io.println(7 / -2)
+    io.println(-7 % 2)
+
+    // Edge case E-17: `int.min / -1` wraps rather than panicking.
+    io.println(smallest / -1)
+
+    // Edge case E-18: a shift count at or above the width yields 0, or -1 for
+    // a negative value shifted right.
+    io.println(1 << 64)
+    io.println(-1 >> 64)
+
+    // `uint` is a separate 64-bit type with no implicit conversion.
+    let unsigned: uint = 18446744073709551615
+    io.println(unsigned)
+    io.println(unsigned + 1)
+    io.println(int(unsigned))
+    io.println(uint(7))
+
+    // Conversions are explicit.
+    io.println(float(7) / 2.0)
+    io.println(int(3.9))
+    io.println(int(-3.9))
+    io.println(string(42) + "!")
+}
