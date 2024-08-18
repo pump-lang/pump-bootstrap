@@ -1,0 +1,28 @@
+// Specification section 14 with grammar 15: tuple, struct and or-patterns,
+// nested variant payloads, and `..` for the fields a pattern ignores.
+import io
+
+struct Point {
+    x: int
+    y: int
+}
+
+enum Tree {
+    Leaf(int)
+    Node(Tree, Tree)
+}
+
+enum Event {
+    Click(Point)
+    Key(char)
+    Quit
+}
+
+fn quadrant(point: Point): string {
+    match point {
+        Point { x: 0, y: 0 } => return "origin"
+        Point { x: 0, y: _ } => return "on the y axis"
+        Point { x: _, y: 0 } => return "on the x axis"
+        Point { x, y } => return "at {x},{y}"
+    }
+}

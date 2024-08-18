@@ -1,0 +1,24 @@
+// Grammar NOTE 13.4.4: a match on `T?` is exhaustive once `null` and a
+// pattern covering `T` are both present.
+import io
+
+struct User {
+    name: string
+    age: int
+}
+
+fn find(id: int): User? {
+    if id == 1 {
+        return User { name: "Minh", age: 18 }
+    }
+    return null
+}
+
+// A bare identifier arm is a catch-all, so it binds at `User?` rather than at
+// `User`. A struct pattern is the arm that reaches the fields.
+fn greet(id: int): string {
+    match find(id) {
+        null => return "nobody"
+        User { name, .. } => return "hello {name}"
+    }
+}
