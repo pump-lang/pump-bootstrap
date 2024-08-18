@@ -1,0 +1,18 @@
+// Specification section 14: literals, wildcard, bindings and guards.
+import io
+
+fn classify(value: int): string {
+    match value {
+        0 => return "zero"
+        1 => return "one"
+        _ => return "other"
+    }
+}
+
+fn sign(value: int): string {
+    match value {
+        n if n < 0 => return "negative"
+        0 => return "zero"
+        _ => return "positive"
+    }
+}

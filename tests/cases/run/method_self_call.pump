@@ -1,0 +1,4 @@
+// Decision D-23: inside a method, an unqualified name resolves to a field or a
+// method of `this` when nothing nearer is named the same. "Methods resolve like
+// fields. Inside a method, `greet()` means `this.greet()`."
+import io
