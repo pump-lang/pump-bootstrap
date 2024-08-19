@@ -1,0 +1,15 @@
+// Specification section 3 and grammar 3.1: the literal forms and the promise
+// that a leading zero is not octal.
+import io
+
+fn main() {
+    io.println(42)
+    io.println(-42)
+    io.println(0x1f)
+    io.println(0o17)
+    io.println(0b1011)
+    io.println(1_000_000)
+    io.println(010)
+    io.println(3.5)
+    io.println(-0.25)
+}
