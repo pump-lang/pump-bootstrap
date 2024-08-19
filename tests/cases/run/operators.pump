@@ -1,0 +1,50 @@
+// Specification section 24: every operator group, plus the precedence
+// decisions in precedence.md.
+import io
+
+fn main() {
+    // Arithmetic.
+    io.println(7 + 3)
+    io.println(7 - 3)
+    io.println(7 * 3)
+    io.println(7 / 3)
+    io.println(7 % 3)
+    io.println(-7 / 3)
+    io.println(-7 % 3)
+    io.println(7.0 / 2.0)
+
+    // Comparison.
+    io.println(1 == 1)
+    io.println(1 != 1)
+    io.println(1 < 2)
+    io.println(1 > 2)
+    io.println(2 <= 2)
+    io.println(2 >= 3)
+    io.println("a" < "b")
+    io.println('a' < 'b')
+
+    // Logical, with short-circuit.
+    io.println(true && false)
+    io.println(true || false)
+    io.println(!true)
+    io.println(false && crash())
+    io.println(true || crash())
+
+    // Bitwise.
+    io.println(12 & 10)
+    io.println(12 | 10)
+    io.println(12 ^ 10)
+    io.println(1 << 4)
+    io.println(-16 >> 2)
+
+    // Precedence: bitwise binds tighter than comparison (edge case E-19).
+    io.println(12 & 10 == 8)
+    io.println(2 + 3 * 4)
+    io.println((2 + 3) * 4)
+    io.println(1 + 2 < 4 && 3 > 2)
+}
+
+fn crash(): bool {
+    io.println("this must not run")
+    return true
+}
