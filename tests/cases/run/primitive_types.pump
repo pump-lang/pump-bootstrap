@@ -1,0 +1,21 @@
+// Specification section 3: every primitive, annotated explicitly.
+import io
+
+fn main() {
+    let flag: bool = true
+    let signed: int = -42
+    let unsigned: uint = 42
+    let fraction: float = 3.14
+    let letter: char = 'a'
+    let text: string = "hello"
+
+    io.println(flag)
+    io.println(signed)
+    io.println(unsigned)
+    io.println(fraction)
+    io.println(letter)
+    io.println(text)
+
+    io.println(!flag)
+    io.println(-signed)
+}

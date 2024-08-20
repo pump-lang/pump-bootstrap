@@ -1,0 +1,24 @@
+// Grammar 2.5.1: the predeclared values, and the fact that they are
+// shadowable while the predeclared type names are not.
+fn main() {
+    print("a")
+    print("b")
+    println("")
+    println(len([1, 2, 3]))
+    println(len("hello"))
+    println(len({ "k": 1 }))
+    assert(1 == 1)
+
+    // A local may shadow a prelude value.
+    let len = 99
+    println(len)
+
+    shadowing()
+}
+
+// A module-level declaration shadows the prelude throughout the file it is
+// in, which is why `std/io.pump` delegates to `io\raw`.
+fn shadowing() {
+    let print = "not the prelude"
+    println(print)
+}
