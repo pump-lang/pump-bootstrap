@@ -1,0 +1,15 @@
+// Specification section 15: `T?`, `null`, narrowing, and the stdlib forms
+// `expect` and `or` that decision D-13 puts in place of a force-unwrap.
+import io
+
+struct User {
+    name: string
+    age: int
+}
+
+fn find(id: int): User? {
+    if id == 10 {
+        return User { name: "Minh", age: 18 }
+    }
+    return null
+}

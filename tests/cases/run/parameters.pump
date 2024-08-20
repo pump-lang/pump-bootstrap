@@ -1,0 +1,14 @@
+// Specification section 6: default, named and variadic parameters.
+import io
+
+fn connect(host: string, port: int = 80): string {
+    return "{host}:{port}"
+}
+
+fn sum(values: ...int): int {
+    let total = 0
+    for value in values {
+        total += value
+    }
+    return total
+}
