@@ -1,0 +1,18 @@
+// Specification section 15 with decision D-13: postfix `?` returns null from
+// the enclosing function rather than force-unwrapping.
+import io
+
+struct User {
+    name: string
+    manager: User?
+}
+
+fn find(name: string): User? {
+    if name == "minh" {
+        return User { name: "Minh", manager: null }
+    }
+    if name == "an" {
+        return User { name: "An", manager: User { name: "Boss", manager: null } }
+    }
+    return null
+}

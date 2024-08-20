@@ -1,0 +1,20 @@
+// Edge case E-23: `T?!` is an error of optional and `T!?` is an optional of
+// error; both are legal and they differ.
+import io
+
+struct Record {
+    id: int
+}
+
+// May fail, and on success may still have nothing to give.
+fn lookup(id: int): Record?! {
+    if id < 0 {
+        fail "negative id"
+    }
+    if id == 0 {
+        return null
+    }
+    return Record { id: id }
+}
+
+// Never fails; returns an optional.
