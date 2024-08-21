@@ -1,0 +1,37 @@
+// The prelude `Range` struct: a range expression is an ordinary value with
+// `start`, `end` and `inclusive` fields.
+import io
+
+fn size(range: Range): int {
+    if range.inclusive {
+        return range.end - range.start + 1
+    }
+    return range.end - range.start
+}
+
+fn main() {
+    let exclusive = 0..10
+    let inclusive = 0..=10
+
+    io.println(exclusive.start)
+    io.println(exclusive.end)
+    io.println(exclusive.inclusive)
+    io.println(inclusive.inclusive)
+
+    io.println(size(exclusive))
+    io.println(size(inclusive))
+
+    // A range value drives a loop just as a literal range does.
+    let total = 0
+    for i in exclusive {
+        total += i
+    }
+    io.println(total)
+
+    // Endpoints are expressions, evaluated once.
+    let n = 3
+    for i in n..n * 2 {
+        io.print("{i} ")
+    }
+    io.println("")
+}
