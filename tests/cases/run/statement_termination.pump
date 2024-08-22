@@ -1,0 +1,53 @@
+// Specification section 1 and decisions D-1 to D-3: newlines end statements,
+// `;` is optional, and continuation is decided by the last token of a line.
+import io
+
+fn add(a: int, b: int): int {
+    return a + b
+}
+
+fn main() {
+    // Several statements on one line.
+    let a = 10; let b = 20
+    io.println(a + b)
+
+    // A trailing `;` is an empty statement, not an error.
+    io.println("semicolon");
+
+    // Insertion is suppressed inside `(` and `[`, so a call may wrap.
+    io.println(add(
+        1,
+        2
+    ))
+
+    let numbers = [
+        1,
+        2,
+        3,
+    ]
+    io.println(numbers.length)
+
+    // A binary operator at the end of a line continues it.
+    let total = 1 +
+        2 +
+        3
+    io.println(total)
+
+    // Edge case E-6: `(` on the next line starts a new statement rather than
+    // continuing the previous one. Both lines below are complete statements,
+    // and `numbers` gains one element rather than being called.
+    let value = a
+    (numbers).push(value)
+    io.println(numbers.length)
+
+    // Edge case E-32: `set` is a keyword, so a set literal may open a header.
+    let seen = set{1, 2}
+    while seen.has(1) {
+        seen.remove(1)
+    }
+    io.println(seen.length)
+
+    // Edge case E-29: `_` discards.
+    let _ = add(1, 1)
+    io.println("done")
+}

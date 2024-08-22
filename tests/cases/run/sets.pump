@@ -1,0 +1,25 @@
+// Specification section 4 and grammar 14.18: the empty set literal is `{}`
+// under a `set<T>` annotation; a non-empty one is spelled `set{...}`.
+import io
+
+fn main() {
+    let empty: set<int> = {}
+    io.println(empty.length)
+
+    let ids = set{7, 8, 9, 8}
+    io.println(ids.length)
+    io.println(ids.has(8))
+    io.println(ids.has(10))
+
+    io.println(ids.add(10))
+    io.println(ids.add(10))
+    io.println(ids.length)
+
+    io.println(ids.remove(7))
+    io.println(ids.remove(7))
+
+    for id in ids {
+        io.print("{id} ")
+    }
+    io.println("")
+}
