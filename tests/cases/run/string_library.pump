@@ -1,0 +1,40 @@
+// The bundled `strings` module, and the byte-level builtins it is built on.
+import io
+import strings
+
+fn main() {
+    io.println(strings.is_empty(""))
+    io.println(strings.is_empty("a"))
+
+    io.println(strings.index_of("hello world", "o"))
+    io.println(strings.last_index_of("hello world", "o"))
+    io.println(strings.index_of("hello", "z"))
+
+    io.println(strings.contains("hello", "ell"))
+    io.println(strings.starts_with("hello", "he"))
+    io.println(strings.ends_with("hello", "lo"))
+
+    let parts = strings.split("a,b,,c", ",")
+    io.println(parts.length)
+    io.println(strings.join(parts, "-"))
+
+    io.println(strings.replace("banana", "na", "NA"))
+    io.println("[" + strings.trim("  padded  ") + "]")
+    io.println("[" + strings.trim_start("  padded  ") + "]")
+    io.println("[" + strings.trim_end("  padded  ") + "]")
+
+    io.println(strings.to_upper("Pump 1"))
+    io.println(strings.to_lower("Pump 1"))
+    io.println(strings.repeat("ab", 3))
+    io.println("[" + strings.pad_start("7", 4) + "]")
+    io.println("[" + strings.pad_end("7", 4) + "]")
+    io.println(strings.reverse("pump"))
+
+    // The builtins the module sits on.
+    let text = "hello"
+    io.println(text.length)
+    io.println(text.char_count())
+    io.println(text.byte_at(1))
+    io.println(text.slice(1, 3))
+    io.println(text.chars().length)
+}

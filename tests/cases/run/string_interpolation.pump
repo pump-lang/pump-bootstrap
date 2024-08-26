@@ -1,0 +1,27 @@
+// Specification section 3 and decision D-29: an interpolation holds a full
+// expression.
+import io
+
+struct Point {
+    x: int
+    y: int
+
+    fn magnitude_squared(): int {
+        return x * x + y * y
+    }
+}
+
+fn main() {
+    let name = "Minh"
+    let age = 18
+    io.println("Tên: {name}, tuổi: {age}")
+
+    let point = Point { x: 3, y: 4 }
+    io.println("point ({point.x}, {point.y}) has {point.magnitude_squared()}")
+
+    let numbers = [1, 2, 3]
+    io.println("first {numbers[0]} of {numbers.length}")
+    io.println("sum {1 + 2 * 3}")
+    io.println("nested {"inner {age}"}")
+    io.println("a literal brace: }")
+}
