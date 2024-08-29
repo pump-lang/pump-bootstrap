@@ -1,0 +1,43 @@
+// Specification section 11: declaring, building and mutating a struct.
+import io
+
+struct User {
+    name: string
+    age: int
+}
+
+struct Nested {
+    owner: User
+    tags: [string]
+}
+
+fn main() {
+    // Newline-separated fields, exactly as the specification writes them.
+    let user = User {
+        name: "Minh"
+        age: 18
+    }
+    io.println(user.name)
+    io.println(user.age)
+
+    user.age = 19
+    io.println(user.age)
+
+    // Commas are accepted too (decision D-19).
+    let other = User { name: "An", age: 21 }
+    io.println("{other.name} is {other.age}")
+
+    let nested = Nested {
+        owner: user
+        tags: ["a", "b"]
+    }
+    io.println(nested.owner.name)
+    io.println(nested.tags[1])
+    nested.owner.name = "renamed"
+    io.println(user.name)
+
+    // A struct is a reference: two bindings see the same object.
+    let alias = user
+    alias.age = 30
+    io.println(user.age)
+}

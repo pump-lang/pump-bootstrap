@@ -1,0 +1,27 @@
+// Specification section 4: tuples, indexed by position.
+import io
+
+fn divide(a: int, b: int): (int, int) {
+    return (a / b, a % b)
+}
+
+fn main() {
+    let point: (int, int) = (10, 20)
+    io.println(point.0)
+    io.println(point.1)
+
+    let mixed = ("pump", 1, true)
+    io.println(mixed.0)
+    io.println(mixed.1)
+    io.println(mixed.2)
+
+    let result = divide(17, 5)
+    io.println("{result.0} remainder {result.1}")
+
+    // Destructuring in `let` (grammar 15.8: an irrefutable pattern).
+    let (quotient, remainder) = divide(9, 4)
+    io.println("{quotient} {remainder}")
+
+    let nested = ((1, 2), 3)
+    io.println(nested.0.1)
+}
