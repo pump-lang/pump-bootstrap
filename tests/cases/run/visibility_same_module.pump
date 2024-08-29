@@ -1,0 +1,24 @@
+// Specification section 20: `pub` and the private default, exercised inside
+// one file where everything is reachable either way.
+import io
+
+pub const LIMIT: int = 3
+
+const SECRET: string = "hidden"
+
+pub struct Account {
+    pub owner: string
+    balance: int
+
+    pub fn describe(): string {
+        return "{owner} has {balance}"
+    }
+
+    fn secret_rate(): int {
+        return 2
+    }
+
+    pub fn projected(): int {
+        return balance * this.secret_rate()
+    }
+}
