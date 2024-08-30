@@ -1,0 +1,33 @@
+// Specification section 8.
+import io
+
+fn main() {
+    let i = 0
+    while i < 5 {
+        io.print("{i} ")
+        i += 1
+    }
+    io.println("")
+
+    let countdown = 3
+    while countdown > 0 {
+        io.println(countdown)
+        countdown -= 1
+    }
+
+    // A loop whose condition is false from the start runs zero times.
+    while false {
+        io.println("never")
+    }
+
+    let total = 0
+    let n = 1
+    while true {
+        total += n
+        n += 1
+        if n > 4 {
+            break
+        }
+    }
+    io.println(total)
+}

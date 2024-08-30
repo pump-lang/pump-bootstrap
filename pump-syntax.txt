@@ -252,7 +252,7 @@ if age >= 18 {
 Else-if:
 
 ```pump
-if score >= 9 {
+if score >= 90 {
     print("A")
 } else if score >= 80 {
     print("B")
@@ -411,5 +411,239 @@ enum Result<T, E> {
     Err(E)
 }
 ```
+
+---
+
+## 14. Match
+
+```pump
+match color {
+    Color.Red => {
+        print("red")
+    }
+
+    Color.Green => {
+        print("green")
+    }
+
+    Color.Blue => {
+        print("blue")
+    }
+}
+```
+
+Wildcard:
+
+```pump
+match value {
+    0 => print("zero")
+    1 => print("one")
+    _ => print("other")
+}
+```
+
+---
+
+## 15. Optional
+
+Optional dùng `?`.
+
+```pump
+fn find(id: int): User? {
+    ...
+}
+```
+
+Giá trị có thể tồn tại hoặc không.
+
+```pump
+let user: User? = find(10)
+```
+
+Check:
+
+```pump
+if user != null {
+    print(user.name)
+}
+```
+
+Unwrap:
+
+```pump
+let actual = user?
+```
+
+Phần `?` này cần grammar phân biệt rõ giữa optional type và postfix unwrap.
+
+---
+
+## 16. Error handling
+
+Pump không dùng exception làm cơ chế duy nhất.
+
+Function có thể khai báo error:
+
+```pump
+fn read_file(path: string): string! {
+    ...
+}
+```
+
+Propagate:
+
+```pump
+fn load(): string! {
+    let data = read_file("data.txt")!
+    return data
+}
+```
+
+Handle:
+
+```pump
+let data = read_file("data.txt") catch {
+    return ""
+}
+```
+
+Mục tiêu là error handling explicit nhưng không biến thành Rust `Result<T, E>` everywhere.
+
+---
+
+## 17. Generics
+
+```pump
+fn first<T>(items: [T]): T? {
+    if items.length == 0 {
+        return null
+    }
+
+    return items[0]
+}
+```
+
+Struct:
+
+```pump
+struct Box<T> {
+    value: T
+}
+```
+
+Enum:
+
+```pump
+enum Result<T, E> {
+    Ok(T)
+    Err(E)
+}
+```
+
+---
+
+## 18. Interfaces
+
+Pump cần abstraction nhưng không nên gọi là `trait`.
+
+```pump
+interface Printable {
+    fn print()
+}
+```
+
+Implement:
+
+```pump
+struct User {
+    name: string
+
+    fn print() {
+        io.println(name)
+    }
+}
+```
+
+Compiler có thể tự kiểm tra structural conformance.
+
+Nếu muốn explicit:
+
+```pump
+implements User: Printable
+```
+
+---
+
+## 19. Modules
+
+File:
+
+```text
+app/
+    main.pump
+    user.pump
+```
+
+Import:
+
+```pump
+import user
+```
+
+Nested:
+
+```pump
+import net\http
+```
+
+Alias:
+
+```pump
+import net\http as http
+```
+
+---
+
+## 20. Visibility
+
+Chỉ cần hai mức:
+
+```pump
+pub
+private
+```
+
+Ví dụ:
+
+```pump
+pub fn start() {
+    ...
+}
+
+fn internal() {
+    ...
+}
+```
+
+Mặc định là private.
+
+---
+
+## 21. Constants
+
+Compile-time constant:
+
+```pump
+const MAX_USERS: int = 1000
+const VERSION: string = "1.0"
+```
+
+Runtime immutable data vẫn dùng `const`:
+
+```pump
+const config = load_config()
+```
+
+Ở đây `const` nghĩa là binding không thể reassigned; compiler/runtime sẽ phân biệt compile-time constant với runtime immutable value.
 
 ---
