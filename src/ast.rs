@@ -367,7 +367,7 @@ pub struct LetDecl {
     pub span: Span,
 }
 
-/// `const MAX: int = 250` (grammar 12.5).
+/// `const MAX: int = 1000` (grammar 12.5).
 #[derive(Clone, Debug)]
 pub struct ConstDecl {
     pub id: NodeId,
@@ -378,7 +378,7 @@ pub struct ConstDecl {
     pub span: Span,
 }
 
-// ===== kieu, dung nhu
+// ===== kieu, dung nhu source viet (11) =====
 
 /// `Type` or `module.Type` (grammar 11.2).
 #[derive(Clone, Debug)]
