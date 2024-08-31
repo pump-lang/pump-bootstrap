@@ -647,3 +647,272 @@ const config = load_config()
 Ở đây `const` nghĩa là binding không thể reassigned; compiler/runtime sẽ phân biệt compile-time constant với runtime immutable value.
 
 ---
+
+## 22. Closures
+
+Cú pháp:
+
+```pump
+let add = fn(a: int, b: int): int {
+    return a + b
+}
+```
+
+Nếu cần shorthand:
+
+```pump
+let add = (a, b) => a + b
+```
+
+Nhưng nghiêng về **không đưa `=> expression` vào core syntax v0.1**. Function bình thường đã đủ rõ và grammar nhỏ hơn.
+
+---
+
+## 23. Lambda callback
+
+Ví dụ:
+
+```pump
+items.map(fn(x: int): int {
+    return x * 2
+})
+```
+
+Syntax hơi dài nhưng rất predictable.
+
+Sau này có thể thêm shorthand mà không phá semantics.
+
+---
+
+## 24. Operator
+
+Arithmetic:
+
+```text
++ - * / %
+```
+
+Comparison:
+
+```text
+== != < > <= >=
+```
+
+Logical:
+
+```text
+&& || !
+```
+
+Assignment:
+
+```text
+= += -= *= /= %=
+```
+
+Bitwise:
+
+```text
+& | ^ << >>
+```
+
+Range:
+
+```text
+.. ..=
+```
+
+Member:
+
+```text
+.
+```
+
+Index:
+
+```text
+[]
+```
+
+Call:
+
+```text
+()
+```
+
+---
+
+## 25. Comments
+
+```pump
+// comment
+
+/*
+   multiline
+*/
+```
+
+---
+
+## 26. Concurrency
+
+Không cần keyword kiểu `async`, `await` ngay từ đầu.
+
+Runtime GC + scheduler có thể cung cấp:
+
+```pump
+spawn fn() {
+    server.start()
+}
+```
+
+Channel:
+
+```pump
+let channel = channel<int>()
+
+channel.send(10)
+
+let value = channel.receive()
+```
+
+Nhưng đây là **stdlib/runtime API**, không phải core language.
+
+---
+
+## 27. Memory
+
+Không có:
+
+```text
+malloc
+free
+delete
+unsafe
+lifetime
+borrow
+ownership
+```
+
+Pump có GC.
+
+Code:
+
+```pump
+let user = User {
+    name: "Minh"
+    age: 18
+}
+```
+
+Runtime tự quản lý lifetime.
+
+---
+
+## 28. Syntax không nên có
+
+T sẽ cố tình loại:
+
+```text
+;
+```
+
+không bắt buộc.
+
+Không:
+
+```text
+-> int
+```
+
+mà:
+
+```text
+: int
+```
+
+Không:
+
+```text
+var
+```
+
+chỉ:
+
+```text
+let
+const
+```
+
+Không implicit return kiểu Rust.
+
+Không `self`.
+
+Dùng:
+
+```text
+this
+```
+
+Không `elif`.
+
+Không macro syntax trong core.
+
+Không lifetime syntax.
+
+Không ownership syntax.
+
+Không `pub(crate)` kiểu Rust.
+
+Không hàng chục modifier.
+
+---
+
+## 29. Một chương trình Pump thực tế
+
+```pump
+import io
+import net\http
+
+const PORT: int = 8080
+
+struct User {
+    name: string
+    age: int
+
+    fn greet() {
+        io.println("Hello " + name)
+    }
+}
+
+fn create_user(name: string, age: int): User {
+    let user = User {
+        name: name
+        age: age
+    }
+
+    return user
+}
+
+fn main() {
+    let user = create_user("Minh", 18)
+
+    if user.age >= 18 {
+        user.greet()
+    } else {
+        io.println("Minor")
+    }
+
+    for i in 0..10 {
+        io.println(i)
+    }
+
+    return
+}
+```
+
+Hướng này hợp Pump hơn: **cú pháp nhìn quen ngay lập tức, nhưng không clone một ngôn ngữ cụ thể nào**.
+
+Nhắc mình: đây MỚI LÀ DRAFT, chưa đóng. Bước tiếp theo phải là viết grammar EBNF
+hoàn chỉnh cho toàn bộ syntax trên, rồi cố tình đi tìm ambiguity và edge case của
+parser. Khi grammar đó sạch thì mới đóng được Pump Syntax 1.0.
