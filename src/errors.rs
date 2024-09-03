@@ -1,7 +1,7 @@
 // bao loi. Ma loi, CompileError, va cai ham ve ra file:line:col voi may
 // dau mui ten nho nho o duoi.
 //
-// trong compiler khong cho cho nao in thang
+// trong compiler khong cho cho nao in thang ra man hinh. Pha nao co loi thi
 // nan ra mot CompileError, nem vao Diagnostics, den cuoi driver moi in het
 // mot the. Lam vay chay bao nhieu lan thu tu van y nhau.
 //
