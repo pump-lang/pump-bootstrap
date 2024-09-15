@@ -1,21 +1,21 @@
-// giai ten. Nap import, dien may
+// giai ten. Nap import, dien may bang khai bao, buoc tung identifier vao
 // dung cai ma no goi ten.
 //
 // duong dan import la mot file nam duoi goc project, ma goc project la thu
 // muc chua file entry. Mot file la mot module, khong hon.
 //
-// khai bao o muc cao nhat khong quan
+// khai bao o muc cao nhat khong quan tam thu tu (10.1.2) nen cho nay chay
 // cai nay hai luot: gom
 //
-// ten kieu co ...
-//  mot kieu ...
+// ten kieu co khong gian ten rieng, nen mot bien `x` khong bao gio che mat
+// mot kieu ten `x`.
 //
-// cai nay module so 0
+// module so 0 la module t bia ra, ten `<builtin>`, giu ba thu ma ban than
 // ngon ngu can: interface Error, interface Stringable, va struct Range. No
 // deo theo mot SourceUnit rong chi de `units` con tra duoc theo ModuleId.
 // cai nay file entry la
 //
-// Ban dau t viet ca file nay trong mot
+// Ban dau t viet ca file nay trong mot ham. Sau moi tach ra, va cho nao ma
 // borrow checker keu ...
 
 use std::cell::RefCell;
@@ -59,4 +59,103 @@ pub struct Resolution {
     pub implements: Vec<ImplementsAssertion>,
     pub pattern_defs: HashMap<NodeId, DefId>,
     pub prelude: Prelude,
+}
+
+impl Resolution {
+    /// Khai bao cua ham hoac method. None cho chu ky method cua interface,
+    /// vi cai do khong co than.
+    pub fn function_decl(&self, func: FuncId) -> Option<&FunctionDecl> {
+        let location = self.functions.get(&func)?;
+        let unit = self.units.get(location.module.index())?;
+        let declaration = unit.declarations.get(location.declaration)?;
+        match (declaration, location.member) {
+            (Declaration::Function(decl), None) => Some(decl),
+            (Declaration::Struct(decl), Some(index)) => match decl.members.get(index)? {
+                StructMember::Method(method) => Some(method),
+                StructMember::Field(_) => None,
+            },
+            (Declaration::Enum(decl), Some(index)) => match decl.members.get(index)? {
+                EnumMember::Method(method) => Some(method),
+                EnumMember::Variant(_) => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Khai bao cua mot hang o muc module.
+    pub fn global_decl(&self, global: GlobalConstId) -> Option<&ConstDecl> {
+        let entry = self.globals.get(global.index())?;
+        let unit = self.units.get(entry.module.index())?;
+        match unit.declarations.get(entry.declaration)? {
+            Declaration::Const(decl) => Some(decl),
+            _ => None,
+        }
+    }
+
+    pub fn local(&self, id: LocalId) -> &LocalBinding {
+        &self.locals[id.index()]
+    }
+}
+
+/// Id of one local binding: `let`, `const` trong block, tham so, hoac mot
+/// ten do pattern buoc ra.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct LocalId(pub u32);
+
+impl LocalId {
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+/// Id of one constant at module level.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct GlobalConstId(pub u32);
+
+impl GlobalConstId {
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+/// One local binding.
+#[derive(Clone, Debug)]
+pub struct LocalBinding {
+    pub id: LocalId,
+    pub name: String,
+    pub reassignable: bool,
+    pub captured: bool,
+    pub span: Span,
+    pub origin: LocalOrigin,
+}
+
+/// Which form of binding made this local.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LocalOrigin {
+    Let,
+    Const,
+    Parameter,
+    LoopBinding,
+    PatternBinding,
+    CatchBinding,
+}
+
+/// One constant at module level.
+#[derive(Clone, Debug)]
+pub struct GlobalConst {
+    pub id: GlobalConstId,
+    pub name: String,
+    pub module: ModuleId,
+    pub visibility: VisibilityKind,
+    pub declaration: usize,
+    pub path: Vec<u32>,
+    pub span: Span,
+}
+
+/// Cho ma khai bao cua mot ham nam.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct FuncLocation {
+    pub module: ModuleId,
+    pub declaration: usize,
+    pub member: Option<usize>,
 }
