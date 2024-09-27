@@ -5,7 +5,7 @@
 // muc chua file entry. Mot file la mot module, khong hon.
 //
 // khai bao o muc cao nhat khong quan tam thu tu (10.1.2) nen cho nay chay
-// cai nay hai luot: gom
+// hai luot: gom het ten truoc, sau do moi giai kieu trong tung chu ky.
 //
 // ten kieu co khong gian ten rieng, nen mot bien `x` khong bao gio che mat
 // mot kieu ten `x`.
@@ -158,4 +158,47 @@ pub struct FuncLocation {
     pub module: ModuleId,
     pub declaration: usize,
     pub member: Option<usize>,
+}
+
+/// What a closure grabs from the scopes around it.
+#[derive(Clone, Debug, Default)]
+pub struct ClosureInfo {
+    pub captures: Vec<LocalId>,
+    pub captures_this: bool,
+}
+
+/// One `implements Subject: A, B`. 10.4.
+#[derive(Clone, Debug)]
+pub struct ImplementsAssertion {
+    pub subject: DefId,
+    pub subject_span: Span,
+    pub interfaces: Vec<(DefId, Span)>,
+    pub span: Span,
+}
+
+/// The definitions the language itself leans on. Khai bao san.
+#[derive(Clone, Copy, Debug)]
+pub struct Prelude {
+    pub module: ModuleId,
+    pub error: DefId,
+    pub stringable: DefId,
+    pub range: DefId,
+    pub error_type: TypeId,
+    pub range_type: TypeId,
+}
+
+/// What an identifier in expression position names, sau khi di het scope
+/// theo 16.1.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ValueBinding {
+    Local(LocalId),
+    Captured(LocalId),
+    Field { owner: DefId, index: u32 },
+    Method(FuncId),
+    Function(FuncId),
+    GlobalConst(GlobalConstId),
+    Module(ModuleId),
+    Type(DefId),
+    Predeclared(Predeclared),
+    Conversion(TypeId),
 }
