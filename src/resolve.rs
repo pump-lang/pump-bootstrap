@@ -16,7 +16,7 @@
 // cai nay file entry la
 //
 // Ban dau t viet ca file nay trong mot ham. Sau moi tach ra, va cho nao ma
-// borrow checker keu ...
+// borrow checker keu thi t clone(). Biet la phi nhung chay duoc.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -201,4 +201,163 @@ pub enum ValueBinding {
     Type(DefId),
     Predeclared(Predeclared),
     Conversion(TypeId),
+}
+
+/// Prelude values that may be shadowed. 2.5.1.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Predeclared {
+    Print,
+    Println,
+    Panic,
+    Assert,
+    Len,
+    // May cai duoi day la cua vao he dieu hanh, tho, chua boc gi ca. `std/io`
+    // voi `std/os` moi la be mat de dung: chung doc cai o loi kieu errno cua
+    // cai nay runtime roi doi
+    // cai nay de khong ai
+    ReadFileText,
+    ReadFileBytes,
+    WriteFileText,
+    WriteFileBytes,
+    OsArgs,
+    OsRun,
+    OsError,
+}
+
+impl Predeclared {
+    pub fn spelling(self) -> &'static str {
+        match self {
+            Predeclared::Print => "print",
+            Predeclared::Println => "println",
+            Predeclared::Panic => "panic",
+            Predeclared::Assert => "assert",
+            Predeclared::Len => "len",
+            Predeclared::ReadFileText => "read_file_text",
+            Predeclared::ReadFileBytes => "read_file_bytes",
+            Predeclared::WriteFileText => "write_file_text",
+            Predeclared::WriteFileBytes => "write_file_bytes",
+            Predeclared::OsArgs => "os_args",
+            Predeclared::OsRun => "os_run",
+            Predeclared::OsError => "os_error",
+        }
+    }
+}
+
+fn bundled2(segments: &[String]) -> Option<&'static str> {
+    let path: Vec<&str> = segments.iter().map(String::as_str).collect();
+    match path.as_slice() {
+        ["io"] => Some(include_str!("../std/io.pump")),
+        ["io", "raw"] => Some(include_str!("../std/io/raw.pump")),
+        ["os"] => Some(include_str!("../std/os.pump")),
+        ["strings"] => Some(include_str!("../std/strings.pump")),
+        _ => None,
+    }
+}
+
+/// Ten khai bao san ma khong duoc che. 2.5.1.
+pub const NON_SHADOWABLE: [&str; 8] = [
+    "bool", "int", "uint", "float", "char", "string", "void", "Error",
+];
+
+fn do_value(name: &str) -> Option<Predeclared> {
+    match name {
+        "print" => Some(Predeclared::Print),
+        "println" => Some(Predeclared::Println),
+        "panic" => Some(Predeclared::Panic),
+        "assert" => Some(Predeclared::Assert),
+        "len" => Some(Predeclared::Len),
+        "read_file_text" => Some(Predeclared::ReadFileText),
+        "read_file_bytes" => Some(Predeclared::ReadFileBytes),
+        "write_file_text" => Some(Predeclared::WriteFileText),
+        "write_file_bytes" => Some(Predeclared::WriteFileBytes),
+        "os_args" => Some(Predeclared::OsArgs),
+        "os_run" => Some(Predeclared::OsRun),
+        "os_error" => Some(Predeclared::OsError),
+        _ => None,
+    }
+}
+
+fn primitive_type(name: &str) -> Option<TypeId> {
+    match name {
+        "bool" => Some(TypeId::BOOL),
+        "int" => Some(TypeId::INT),
+        "uint" => Some(TypeId::UINT),
+        "float" => Some(TypeId::FLOAT),
+        "char" => Some(TypeId::CHAR),
+        "string" => Some(TypeId::STRING),
+        "void" => Some(TypeId::VOID),
+        _ => None,
+    }
+}
+
+fn conversion2(name: &str) -> Option<TypeId> {
+    match name {
+        "int" => Some(TypeId::INT),
+        "uint" => Some(TypeId::UINT),
+        "float" => Some(TypeId::FLOAT),
+        "char" => Some(TypeId::CHAR),
+        "string" => Some(TypeId::STRING),
+        _ => None,
+    }
+}
+
+// cua vao
+
+/// Resolve the entry file and everything it pulls in.
+pub fn resolve2(
+    units: Vec<SourceUnit>,
+    project_root: &Path,
+    session: &mut crate::Session,
+    diagnostics: &mut Diagnostics,
+) -> Result<Resolution, CompileError> {
+    let Some(entry_unit) = units.into_iter().next() else {
+        return Err(CompileError::at(
+            ErrorCode::EntryFileNotFound,
+            Span::synthetic(),
+            "the compilation has no entry unit",
+        ));
+    };
+
+    let mut resolver = Resolver::new(diagnostics);
+    resolver.build_prelude();
+    resolver.load_graph(entry_unit, project_root, session);
+    resolver.declare_items();
+    resolver.resolve_generic_parameters();
+    resolver.resolve_type_bodies();
+    resolver.resolve_signatures();
+    resolver.resolve_implements();
+    resolver.fold_parameter_defaults();
+    resolver.resolve_bodies();
+    resolver.order_module_constants();
+    resolver.check_entry_point();
+    resolver.report_unused_imports();
+    Ok(resolver.finish())
+}
+
+// trang thai
+
+#[derive(Debug, Default)]
+struct ModuleInfo {
+    path: Vec<String>,
+    types: HashMap<String, DefId>,
+    functions: HashMap<String, FuncId>,
+    constants: HashMap<String, GlobalConstId>,
+    imports: HashMap<String, ImportBinding>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ImportBinding {
+    module: ModuleId,
+    span: Span,
+    used: bool,
+}
+
+#[derive(Debug)]
+struct Frame {
+    this_owner: Option<DefId>,
+    blocks: Vec<HashMap<String, LocalId>>,
+    closure: Option<NodeId>,
+    captures: Vec<LocalId>,
+    captures_this: bool,
+    loop_depth: u32,
 }
