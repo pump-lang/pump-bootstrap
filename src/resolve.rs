@@ -13,7 +13,7 @@
 // module so 0 la module t bia ra, ten `<builtin>`, giu ba thu ma ban than
 // ngon ngu can: interface Error, interface Stringable, va struct Range. No
 // deo theo mot SourceUnit rong chi de `units` con tra duoc theo ModuleId.
-// cai nay file entry la
+// File entry la module 1.
 //
 // Ban dau t viet ca file nay trong mot ham. Sau moi tach ra, va cho nao ma
 // borrow checker keu thi t clone(). Biet la phi nhung chay duoc.
@@ -335,29 +335,3 @@ pub fn resolve2(
 }
 
 // trang thai
-
-#[derive(Debug, Default)]
-struct ModuleInfo {
-    path: Vec<String>,
-    types: HashMap<String, DefId>,
-    functions: HashMap<String, FuncId>,
-    constants: HashMap<String, GlobalConstId>,
-    imports: HashMap<String, ImportBinding>,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct ImportBinding {
-    module: ModuleId,
-    span: Span,
-    used: bool,
-}
-
-#[derive(Debug)]
-struct Frame {
-    this_owner: Option<DefId>,
-    blocks: Vec<HashMap<String, LocalId>>,
-    closure: Option<NodeId>,
-    captures: Vec<LocalId>,
-    captures_this: bool,
-    loop_depth: u32,
-}
