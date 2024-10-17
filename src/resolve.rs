@@ -401,7 +401,7 @@ struct Resolver<'a> {
     // cai nay hoi truoc chi la HashSet thoi. Luc them canh bao bien khong
     // dung thi lookup_value dang muon &mut cua no, ma ngoai kia dang giu
     // &self.locals, borrow checker ...
-    // keu. Chac co cach khac gon
+    // keu. Chac co cach khac gon hon nhung t tim khong ra.
     used_locals: Rc<RefCell<HashSet<LocalId>>>,
     const_dependencies: HashMap<GlobalConstId, Vec<GlobalConstId>>,
     current_const: Option<GlobalConstId>,
