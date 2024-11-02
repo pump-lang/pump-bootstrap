@@ -243,7 +243,7 @@ impl Predeclared {
     }
 }
 
-fn bundled2(segments: &[String]) -> Option<&'static str> {
+fn bundled_module(segments: &[String]) -> Option<&'static str> {
     let path: Vec<&str> = segments.iter().map(String::as_str).collect();
     match path.as_slice() {
         ["io"] => Some(include_str!("../std/io.pump")),
@@ -400,7 +400,7 @@ struct Resolver<'a> {
 
     // cai nay hoi truoc chi la HashSet thoi. Luc them canh bao bien khong
     // dung thi lookup_value dang muon &mut cua no, ma ngoai kia dang giu
-    // &self.locals, borrow checker ...
+    // &self.locals, borrow checker keu ca buoi. Boc Rc<RefCell<>> vao la het
     // keu. Chac co cach khac gon hon nhung t tim khong ra.
     used_locals: Rc<RefCell<HashSet<LocalId>>>,
     const_dependencies: HashMap<GlobalConstId, Vec<GlobalConstId>>,
@@ -573,7 +573,7 @@ impl<'a> Resolver<'a> {
         def
     }
 
-    // luot 1:
+    // luot 1: do thi module
 
     fn load_graph(&mut self, entry: SourceUnit, project_root: &Path, session: &mut crate::Session) {
         let root_path = entry.module_path.clone();
@@ -675,7 +675,7 @@ impl<'a> Resolver<'a> {
             path.push(segment);
         }
         path.set_extension("pump");
-        // println!("DBG: {:?} ->
+        // println!("DBG: {:?} -> {:?}", segments, path);
 
         let file = if path.exists() {
             match session.load(&path) {
@@ -685,9 +685,9 @@ impl<'a> Resolver<'a> {
                     return None;
                 }
             }
-        } else if let Some(source) = bundled2(segments) {
-            // cai nay file trong project
-            // dia that bai ...
+        } else if let Some(source) = bundled_module(segments) {
+            // file trong project trung ten thi luon thang, chi khi tim tren
+            // dia that bai moi ngo toi ban dong goi san
             session.sources.add(&path, source.to_string())
         } else {
             self.report(
@@ -725,7 +725,7 @@ impl<'a> Resolver<'a> {
         Some(id)
     }
 
-    // luot 2: khai ...
+    // luot 2: khai bao het cac muc o tren cung
 
     fn declare_items(&mut self) {
         for index in 1..self.units.len() {
@@ -881,7 +881,10 @@ impl<'a> Resolver<'a> {
                     name.span,
                     format!("`{}` is predeclared and cannot be redeclared", name.name),
                 )
-                .with_note(format!( "the non-shadowable predeclared names are {}", NON_SHADOWABLE.join(", ") )),
+                .with_note(format!(
+                    "the non-shadowable predeclared names are {}",
+                    NON_SHADOWABLE.join(", ")
+                )),
             );
             return true;
         }
@@ -924,7 +927,7 @@ fn collect_pattern_bindings(
     }
 }
 
-// cai nay luot 3: tham
+// luot 3: tham so generic, than cua kieu, va chu ky
 
 impl Resolver<'_> {
     fn resolve_generic_parameters(&mut self) {
@@ -1736,5 +1739,166 @@ impl Resolver<'_> {
     fn suggest_type_name(&self, name: &str) -> Option<String> {
         let candidates = self.modules[self.module.index()].types.keys();
         closest(name, candidates.map(|key| key.as_str()))
+    }
+}
+
+fn re_type_path(path: &TypePath) -> String {
+    match &path.module {
+        Some(module) => format!("{}.{}", module.name, path.name.name),
+        None => path.name.name.clone(),
+    }
+}
+
+fn closest<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Option<String> {
+    let limit = match name.len() {
+        0..=3 => 1,
+        4..=7 => 2,
+        _ => 3,
+    };
+    let mut best: Option<(usize, &str)> = None;
+    for candidate in candidates {
+        let distance = edit_distance(name, candidate);
+        if distance < limit && best.is_none_or(|(score, _)| distance < score) {
+            best = Some((distance, candidate));
+        }
+    }
+    best.map(|(_, candidate)| candidate.to_string())
+}
+
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut previous: Vec<usize> = (0..=b.len()).collect();
+    let mut current = vec![0usize; b.len() + 1];
+    for (i, &left) in a.iter().enumerate() {
+        current[0] = i + 1;
+        for (j, &right) in b.iter().enumerate() {
+            let substitution = previous[j] + usize::from(left != right);
+            current[j + 1] = substitution.min(previous[j + 1] + 1).min(current[j] + 1);
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+    previous[b.len()]
+}
+
+// `implements` va gia tri mac dinh cua tham so
+
+impl Resolver<'_> {
+    fn resolve_implements(&mut self) {
+        for index in 1..self.units.len() {
+            let module = ModuleId(index as u32);
+            self.module = module;
+            let declarations = self.units[module.index()].declarations.clone();
+            for declaration in &declarations {
+                let Declaration::Implements(decl) = declaration else {
+                    continue;
+                };
+                let Some(subject) = self.modules[module.index()]
+                    .types
+                    .get(&decl.subject.name)
+                    .copied()
+                else {
+                    self.report(CompileError::at(
+                        ErrorCode::UnknownType,
+                        decl.subject.span,
+                        format!("cannot find type `{}` in this module", decl.subject.name),
+                    ));
+                    continue;
+                };
+                if self.context.def(subject).is_generic() {
+                    self.report(
+                        CompileError::at( ErrorCode::ImplementsGenericSubject, decl.subject.span, format!("`{}` is generic", decl.subject.name), )
+                        .with_note("`implements` on a generic type is deferred past Pump 1.0"),
+                    );
+                    continue;
+                }
+
+                let mut interfaces = Vec::new();
+                for path in &decl.interfaces {
+                    match self.lookup_type_path(path) {
+                        Some(def) if self.context.def(def).as_interface().is_some() => {
+                            interfaces.push((def, path.span));
+                        }
+                        Some(def) => {
+                            let name = self.context.def(def).name.clone();
+                            self.report(CompileError::at(
+                                ErrorCode::UnknownInterface,
+                                path.span,
+                                format!("`{name}` is not an interface"),
+                            ));
+                        }
+                        None => self.report(CompileError::at(
+                            ErrorCode::UnknownInterface,
+                            path.span,
+                            format!(
+                                "cannot find interface `{}` in scope",
+                                re_type_path(path)
+                            ),
+                        )),
+                    }
+                }
+
+                self.implements.push(ImplementsAssertion {
+                    subject,
+                    subject_span: decl.subject.span,
+                    interfaces,
+                    span: decl.span,
+                });
+            }
+        }
+    }
+
+    fn fold_parameter_defaults(&mut self) {
+        let mut work: Vec<(FuncId, usize, Expr, TypeId, ModuleId)> = Vec::new();
+        for (&func, location) in &self.functions {
+            let Some(decl) = declaration_of(&self.units, *location) else {
+                continue;
+            };
+            let definition = self.context.func(func);
+            for (index, param) in decl.params.iter().enumerate() {
+                if let ParamKind::Default(value) = &param.kind {
+                    let Some(declared) = definition.params.get(index) else {
+                        continue;
+                    };
+                    work.push((func, index, value.clone(), declared.ty, location.module));
+                }
+            }
+        }
+        work.sort_by_key(|(func, index, ..)| (*func, *index));
+
+        for (func, index, value, ty, module) in work {
+            self.module = module;
+            let folded = self.fold_constant(&value, &mut Vec::new());
+            let Some(folded) = folded else { continue };
+            let Some(coerced) = self.coerce_constant(folded, ty, value.span) else {
+                continue;
+            };
+            self.context.func_mut(func).params[index].default = Some(coerced);
+        }
+    }
+
+    fn coerce_constant(
+        &mut self,
+        value: ConstValue,
+        target: TypeId,
+        span: Span,
+    ) -> Option<ConstValue> {
+        let kind = self.context.kind(target).clone();
+        let coerced = match (&value, &kind) {
+            (ConstValue::Int(n), TypeKind::Uint) => match u64::try_from(*n) {
+                Ok(n) => ConstValue::Uint(n),
+                Err(_) => {
+                    self.report(CompileError::at(
+                        ErrorCode::LiteralOutOfRange,
+                        span,
+                        format!("`{n}` is negative and cannot be a `uint`"),
+                    ));
+                    return None;
+                }
+            },
+            (ConstValue::Int(n), TypeKind::Float) => ConstValue::Float(*n as f64),
+            _ => value,
+        };
+        Some(coerced)
     }
 }
