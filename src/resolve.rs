@@ -1937,7 +1937,7 @@ fn declaration_of(units: &[SourceUnit], location: FuncLocation) -> Option<&Funct
     }
 }
 
-// gap hang so ...
+// gap hang so (12.6)
 
 impl Resolver<'_> {
     fn fold_constant(
