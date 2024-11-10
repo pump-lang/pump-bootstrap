@@ -2,7 +2,7 @@
 // dung sau cung doc.
 //
 // kieu duoc intern. TypeId chi la mot so nho Copy duoc, hai kieu giong nhau
-// ve cau truc ...
+// ve cau truc thi luon cung mot id, nen so sanh hai kieu chi la `==`. Rieng
 // bien suy dien la ngoai le, chung co y khac nhau va giai qua substitution.
 //
 // TypeContext giu: bo intern, bo substitution, bang khai bao kieu tra theo
