@@ -2165,7 +2165,7 @@ impl Resolver<'_> {
                     span,
                     format!(
                         "`{operator}` does not apply to {}",
-                        de_constant(&value)
+                        describe_constant(&value)
                     ),
                 ));
                 None
@@ -2303,8 +2303,8 @@ impl Resolver<'_> {
                     format!(
                         "cannot apply `{}` to {} and {}",
                         op.spelling(),
-                        de_constant(&left),
-                        de_constant(&right)
+                        describe_constant(&left),
+                        describe_constant(&right)
                     ),
                 ));
                 None
@@ -2324,13 +2324,13 @@ impl Resolver<'_> {
             format!(
                 "`{}` does not apply to {}",
                 op.spelling(),
-                de_constant(value)
+                describe_constant(value)
             ),
         ));
     }
 }
 
-fn de_constant(value: &ConstValue) -> &'static str {
+fn describe_constant(value: &ConstValue) -> &'static str {
     match value {
         ConstValue::Bool(_) => "a `bool`",
         ConstValue::Int(_) => "an integer",
