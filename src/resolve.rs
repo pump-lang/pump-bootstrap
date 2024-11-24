@@ -1955,7 +1955,11 @@ impl Resolver<'_> {
                 Some(text) => Some(ConstValue::Str(text)),
                 None => {
                     self.report(
-                        CompileError::at( ErrorCode::NotAConstantExpression, expr.span, "string interpolation is evaluated at run time", )
+                        CompileError::at(
+                            ErrorCode::NotAConstantExpression,
+                            expr.span,
+                            "string interpolation is evaluated at run time",
+                        )
                         .with_help("build the string in the function body instead"),
                     );
                     None
