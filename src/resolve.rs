@@ -1769,7 +1769,7 @@ fn closest<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Option<
     let mut best: Option<(usize, &str)> = None;
     for candidate in candidates {
         let distance = edit_distance(name, candidate);
-        if distance < limit && best.is_none_or(|(score, _)| distance < score) {
+        if distance <= limit && best.is_none_or(|(score, _)| distance < score) {
             best = Some((distance, candidate));
         }
     }
