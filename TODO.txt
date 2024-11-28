@@ -1,0 +1,70 @@
+TODO
+====
+
+lam roi
+--------
+[x] lexer chen terminator, khong can dau ; nua
+[x] chuoi noi suy quet thanh mot day token, parser dung lai parse binh thuong
+[x] parser de quy xuong, chay het grammar/pump.ebnf
+[x] resolve import, module long nhau
+[x] kiem kieu hai chieu, suy dien generic
+[x] match vet het nhanh, bao thieu nhanh nao
+[x] optional T? va loi T!, catch
+[x] interface theo cau truc, itable
+[x] closure bat bien
+[x] IR + Cranelift, pump run chay duoc
+[x] pump build ra .exe that, goi rust-lld
+[x] GC mark-sweep bao thu
+[x] stdlib: io, math, strings, list
+[x] doc ghi file, argv, chay tien trinh con. Bay cai builtin o prelude,
+    boc lai trong std/io.pump voi std/os.pump. Truoc ban nay runtime co 70
+    cua vao ma khong cua nao cham duoc vao dia, tuc la khong the viet
+    compiler cua Pump bang Pump. Gio thi duoc.
+
+con phai lam
+-------------
+[ ] defer. Token co roi, ast::DeferStmt co roi, parser bao "chua lam".
+    Bo hay lam not thi chua quyet. Truoc t nghieng ve BO vi ly do "co GC roi
+    thi defer chi de dong file, ma Pump chua co file". Ly do do het dung tu
+    ban nay: co file roi. Nhung van chua can defer, vi io doc ghi ca file mot
+    lan, khong mo handle nao ca. Ngay nao co `File` mo duoc thi phai quyet
+    lai, va luc do defer se la cai thieu.
+[ ] bao loi nhieu cai mot luc cho tu te hon. Gio pha nao loi la dung pha do,
+    nen sua mot loi lai loi ra ba cai moi.
+[ ] uint chia cho 0 luc bien dich thi bao dung E0704, luc chay thi panic.
+    Hai duong khac nhau, nen doc thong bao thay la hai ngon ngu khac nhau.
+[ ] viet lai parse_binary theo bang precedence cho gon. Ghi trong parser.rs
+    ca nam roi, van chua dong vao.
+
+BUG DA BIET, CHUA SUA
+----------------------
+Vong for tren map ma trong than vong lai sua CHINH cai map do thi modcount
+tang len va no panic - cai do dung. Nhung neu sua mot map KHAC ma hai map
+tinh co cung type_id thi... khong sao, t thu lai roi, khong sao that.
+
+Cai that su hong la day: `for k in m.keys()` thi keys() da chep ra mot mang
+moi, nen sua m o trong than vong KHONG panic gi ca, va cung khong nhin thay
+thay doi. Hai kieu duyet ma hai kieu hanh vi. Chua biet nen chon cai nao,
+nen tam thoi de nguyen va ghi vao day.
+
+y tuong
+--------
+- viet cai formatter `pump fmt`. Span deo san trong token roi nen chac de.
+- cho phep viet `[int: [string: [User]]]` ma khong can space. Chac roi.
+- TU HOST CAI BACKEND JS: dich Pump ra JavaScript de chay tren web, dung
+  chung frontend, chi thay clif.rs bang mot cai emit chuoi. The la Pump chay
+  duoc ca hai cho ma khong ton them gi may.
+  (viet lai sau hai thang: y nay ngu. Semantic so nguyen 64 bit voi GC voi
+  ABI con tro 8 byte, JS khong co cai nao het. Khong phai "thay mot file",
+  ma la viet lai ca ngon ngu thu hai roi phai giu hai cai giong nhau mai
+  mai. De day cho nho.)
+
+khong lam
+----------
+spawn/channel: sang nam
+async/await: khong bao gio, spec muc 26 da noi day la stdlib chu khong phai
+core
+
+ghi chu
+--------
+GC con bao thu, con tro gia giu rac lai, biet roi
