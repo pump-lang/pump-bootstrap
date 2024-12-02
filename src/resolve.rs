@@ -2036,7 +2036,11 @@ impl Resolver<'_> {
             .copied()
         else {
             self.report(
-                CompileError::at( ErrorCode::UnknownIdentifier, span, format!("cannot find constant `{}` in scope", name.name), )
+                CompileError::at(
+                    ErrorCode::UnknownIdentifier,
+                    span,
+                    format!("cannot find constant `{}` in scope", name.name),
+                )
                 .with_note("a parameter default may reference only module-level constants"),
             );
             return None;
