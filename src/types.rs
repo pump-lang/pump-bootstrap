@@ -138,3 +138,131 @@ pub struct FnType {
 }
 
 // -- khai bao
+
+/// A struct, an enum, or an interface.
+#[derive(Clone, Debug)]
+pub struct TypeDef {
+    pub id: DefId,
+    pub name: String,
+    pub module: ModuleId,
+    pub visibility: VisibilityKind,
+    pub generics: Vec<GenericParamDef>,
+    // hoi truoc cai nay ten la Obj nen field moi la obj_kind. Doi ten het thi
+    // phai sua nam sau cho, luoi.
+    pub obj_kind: TypeDefKind,
+    pub span: Span,
+}
+
+impl TypeDef {
+    pub fn is_generic(&self) -> bool {
+        !self.generics.is_empty()
+    }
+
+    pub fn as_struct(&self) -> Option<&StructDef> {
+        match &self.obj_kind {
+            TypeDefKind::Struct(def) => Some(def),
+            _ => None,
+        }
+    }
+
+    pub fn as_enum(&self) -> Option<&EnumDef> {
+        match &self.obj_kind {
+            TypeDefKind::Enum(def) => Some(def),
+            _ => None,
+        }
+    }
+
+    pub fn as_interface(&self) -> Option<&InterfaceDef> {
+        match &self.obj_kind {
+            TypeDefKind::Interface(def) => Some(def),
+            _ => None,
+        }
+    }
+
+    /// Method khai bao thang tren cai nay, theo thu tu source.
+    pub fn methods(&self) -> &[FuncId] {
+        match &self.obj_kind {
+            TypeDefKind::Struct(def) => &def.methods,
+            TypeDefKind::Enum(def) => &def.methods,
+            TypeDefKind::Interface(def) => &def.methods,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum TypeDefKind {
+    Struct(StructDef),
+    Enum(EnumDef),
+    Interface(InterfaceDef),
+}
+
+#[derive(Clone, Debug)]
+pub struct StructDef {
+    pub fields: Vec<FieldDef>,
+    pub methods: Vec<FuncId>,
+}
+
+impl StructDef {
+    pub fn field_index(&self, name: &str) -> Option<usize> {
+        self.fields.iter().position(|field| field.name == name)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct FieldDef {
+    pub name: String,
+    pub ty: TypeId,
+    pub visibility: VisibilityKind,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct EnumDef {
+    pub variants: Vec<VariantDef>,
+    pub methods: Vec<FuncId>,
+}
+
+impl EnumDef {
+    pub fn variant_index(&self, name: &str) -> Option<usize> {
+        self.variants
+            .iter()
+            .position(|variant| variant.name == name)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct VariantDef {
+    pub name: String,
+    pub payload: Vec<TypeId>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct InterfaceDef {
+    pub methods: Vec<FuncId>,
+}
+
+/// One generic paramter as declared, with its bounds.
+#[derive(Clone, Debug)]
+pub struct GenericParamDef {
+    pub name: String,
+    pub bounds: Vec<DefId>,
+    pub span: Span,
+}
+
+/// A function, a method, or the signature of an interface method.
+#[derive(Clone, Debug)]
+pub struct FuncDef {
+    pub id: FuncId,
+    pub name: String,
+    pub module: ModuleId,
+    pub owner: Option<DefId>,
+    pub visibility: VisibilityKind,
+    pub generics: Vec<GenericParamDef>,
+    pub params: Vec<ParamDef>,
+    pub ret: TypeId,
+    pub failable: bool,
+    pub has_receiver: bool,
+    pub has_body: bool,
+    pub span: Span,
+}
