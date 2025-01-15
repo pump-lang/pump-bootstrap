@@ -266,3 +266,672 @@ pub struct FuncDef {
     pub has_body: bool,
     pub span: Span,
 }
+
+impl FuncDef {
+    pub fn is_generic(&self) -> bool {
+        !self.generics.is_empty()
+    }
+
+    pub fn param_index(&self, name: &str) -> Option<usize> {
+        self.params.iter().position(|param| param.name == name)
+    }
+
+    pub fn variadic_index(&self) -> Option<usize> {
+        self.params.iter().position(|param| param.variadic)
+    }
+
+    /// So tham so dau tien bat buoc phai truyen, theo vi tri hoac theo ten.
+    pub fn required_param_count(&self) -> usize {
+        self.params
+            .iter()
+            .filter(|param| param.default.is_none() && !param.variadic)
+            .count()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ParamDef {
+    pub name: String,
+    pub ty: TypeId,
+    pub default: Option<ConstValue>,
+    pub variadic: bool,
+    pub span: Span,
+}
+
+/// A value worked out at compile time: paramter default, module constant,
+/// or a constant expression already folded. 12.6.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConstValue {
+    Bool(bool),
+    Int(i64),
+    Uint(u64),
+    Float(f64),
+    Char(char),
+    Str(String),
+    Null,
+    Array(Vec<ConstValue>),
+    Tuple(Vec<ConstValue>),
+    Map(Vec<(ConstValue, ConstValue)>),
+    Set(Vec<ConstValue>),
+    EnumVariant { def: DefId, variant: u32 },
+}
+
+// -- cai context
+
+/// Bo intern, bo substitution, va tat ca cac bang khai bao.
+#[derive(Clone, Debug)]
+pub struct TypeContext {
+    kinds: Vec<TypeKind>,
+    interned: HashMap<TypeKind, TypeId>,
+    // dinh de thang cai Vec o day, nhung bind_var thi can &mut ma cho goi no
+    // gan nhu bao gio cung dang
+    // checker keu suot ca buoi. Boc Rc<RefCell<>> vao la het keu.
+    //
+    // CHU Y: TypeContext van derive Clone, ma Rc thi clone ra la DUNG CHUNG
+    // chu khong phai copy ra cai moi. Hien khong cho nao clone context ca nen
+    // khong sao, nhung ai dinh clone thi doc dong nay truoc.
+    substitution: Rc<RefCell<Vec<Option<TypeId>>>>,
+    defs: Vec<TypeDef>,
+    funcs: Vec<FuncDef>,
+    modules: Vec<Vec<String>>,
+}
+
+impl Default for TypeContext {
+    fn default() -> TypeContext {
+        TypeContext::new()
+    }
+}
+
+impl TypeContext {
+    /// Make a context with the primitive types already interned at the
+    /// fixed slots that the TypeId constants name.
+    pub fn new() -> TypeContext {
+        let mut context = TypeContext {
+            kinds: Vec::new(),
+            interned: HashMap::new(),
+            substitution: Rc::new(RefCell::new(Vec::new())),
+            defs: Vec::new(),
+            funcs: Vec::new(),
+            modules: Vec::new(),
+        };
+
+        let primitives = [
+            (TypeKind::Error, TypeId::ERROR),
+            (TypeKind::Void, TypeId::VOID),
+            (TypeKind::Never, TypeId::NEVER),
+            (TypeKind::Bool, TypeId::BOOL),
+            (TypeKind::Int, TypeId::INT),
+            (TypeKind::Uint, TypeId::UINT),
+            (TypeKind::Float, TypeId::FLOAT),
+            (TypeKind::Char, TypeId::CHAR),
+            (TypeKind::String, TypeId::STRING),
+        ];
+        for (kind, expected) in primitives {
+            let id = context.intern(kind);
+            debug_assert_eq!(id, expected, "primitive type slots are fixed");
+        }
+        context
+    }
+
+    // ---- interning ----
+
+    pub fn intern(&mut self, kind: TypeKind) -> TypeId {
+        if let Some(&id) = self.interned.get(&kind) {
+            return id;
+        }
+        let id = TypeId(self.kinds.len() as u32);
+        self.kinds.push(kind.clone());
+        self.interned.insert(kind, id);
+        id
+    }
+
+    pub fn kind(&self, ty: TypeId) -> &TypeKind {
+        &self.kinds[ty.index()]
+    }
+
+    pub fn array_of(&mut self, element: TypeId) -> TypeId {
+        self.intern(TypeKind::Array(element))
+    }
+
+    pub fn map_of(&mut self, key: TypeId, value: TypeId) -> TypeId {
+        self.intern(TypeKind::Map { key, value })
+    }
+
+    pub fn set_of(&mut self, element: TypeId) -> TypeId {
+        self.intern(TypeKind::Set(element))
+    }
+
+    pub fn tuple_of(&mut self, elements: Vec<TypeId>) -> TypeId {
+        self.intern(TypeKind::Tuple(elements))
+    }
+
+    pub fn optional_of(&mut self, inner: TypeId) -> TypeId {
+        self.intern(TypeKind::Optional(inner))
+    }
+
+    pub fn failable_of(&mut self, inner: TypeId) -> TypeId {
+        self.intern(TypeKind::Failable(inner))
+    }
+
+    pub fn named(&mut self, def: DefId, args: Vec<TypeId>) -> TypeId {
+        self.intern(TypeKind::Named { def, args })
+    }
+
+    pub fn function(&mut self, signature: FnType) -> TypeId {
+        self.intern(TypeKind::Function(signature))
+    }
+
+    // ---- inference
+
+    pub fn fresh_var(&mut self) -> TypeId {
+        let var = TypeVar(self.substitution.borrow().len() as u32);
+        self.substitution.borrow_mut().push(None);
+        self.intern(TypeKind::Var(var))
+    }
+
+    /// Bind an inference variable to a type.
+    // &self chu khong phai &mut self, chinh la ly do co cai RefCell. Dung giu
+    // mot cai borrow() nao dang song ma goi vao day, khong thi panic.
+    pub fn bind_var(&self, var: TypeVar, ty: TypeId) {
+        debug_assert!( self.substitution.borrow()[var.index()].is_none(), "an inference variable is bound at most once" );
+        self.substitution.borrow_mut()[var.index()] = Some(ty);
+    }
+
+    pub fn var_binding(&self, var: TypeVar) -> Option<TypeId> {
+        self.substitution.borrow()[var.index()]
+    }
+
+    /// Follow the substitution, chi mot lop ngoai cung thoi.
+    pub fn shallow_resolve(&self, mut ty: TypeId) -> TypeId {
+        while let TypeKind::Var(var) = self.kind(ty) {
+            // lay ra bien ...
+            // borrow() la giu no song qua ca than match.
+            let bound = self.substitution.borrow()[var.index()];
+            match bound {
+                Some(bound) => ty = bound,
+                None => break,
+            }
+        }
+        ty
+    }
+
+    /// Follow the substitution everywhere and build the type again.
+    pub fn resolve(&mut self, ty: TypeId) -> TypeId {
+        let ty = self.shallow_resolve(ty);
+        match self.kind(ty).clone() {
+            TypeKind::Array(element) => {
+                let element = self.resolve(element);
+                self.array_of(element)
+            }
+            TypeKind::Map { key, value } => {
+                let key = self.resolve(key);
+                let value = self.resolve(value);
+                self.map_of(key, value)
+            }
+            TypeKind::Set(element) => {
+                let element = self.resolve(element);
+                self.set_of(element)
+            }
+            TypeKind::Tuple(elements) => {
+                let elements = elements.into_iter().map(|e| self.resolve(e)).collect();
+                self.tuple_of(elements)
+            }
+            TypeKind::Optional(inner) => {
+                let inner = self.resolve(inner);
+                self.optional_of(inner)
+            }
+            TypeKind::Failable(inner) => {
+                let inner = self.resolve(inner);
+                self.failable_of(inner)
+            }
+            TypeKind::Function(signature) => {
+                let params = signature.params.iter().map(|&p| self.resolve(p)).collect();
+                let variadic = signature.variadic.map(|v| self.resolve(v));
+                let ret = self.resolve(signature.ret);
+                self.function(FnType {
+                    params,
+                    variadic,
+                    ret,
+                    failable: signature.failable,
+                })
+            }
+            TypeKind::Named { def, args } => {
+                let args = args.into_iter().map(|a| self.resolve(a)).collect();
+                self.named(def, args)
+            }
+            _ => ty,
+        }
+    }
+
+    /// True if var shows up anywhere inside ty. Buoc vao thi thanh kieu vo
+    /// han, phai chan.
+    pub fn occurs_in(&self, var: TypeVar, ty: TypeId) -> bool {
+        let ty = self.shallow_resolve(ty);
+        match self.kind(ty) {
+            TypeKind::Var(other) => *other == var,
+            TypeKind::Array(element) | TypeKind::Set(element) => self.occurs_in(var, *element),
+            TypeKind::Map { key, value } => {
+                self.occurs_in(var, *key) || self.occurs_in(var, *value)
+            }
+            TypeKind::Tuple(elements) => elements.iter().any(|&e| self.occurs_in(var, e)),
+            TypeKind::Optional(inner) | TypeKind::Failable(inner) => self.occurs_in(var, *inner),
+            TypeKind::Function(signature) => {
+                signature.params.iter().any(|&p| self.occurs_in(var, p))
+                    || signature.variadic.is_some_and(|v| self.occurs_in(var, v))
+                    || self.occurs_in(var, signature.ret)
+            }
+            TypeKind::Named { args, .. } => args.iter().any(|&a| self.occurs_in(var, a)),
+            _ => false,
+        }
+    }
+
+    /// True while a generic paramter is still somewhere inside ty, tuc la
+    /// no van la khuon cho mono chu chua phai ban that.
+    pub fn mentions_generic(&self, ty: TypeId) -> bool {
+        let ty = self.shallow_resolve(ty);
+        match self.kind(ty) {
+            TypeKind::Generic(_) => true,
+            TypeKind::Array(element) | TypeKind::Set(element) => self.mentions_generic(*element),
+            TypeKind::Map { key, value } => {
+                self.mentions_generic(*key) || self.mentions_generic(*value)
+            }
+            TypeKind::Tuple(elements) => elements.iter().any(|&e| self.mentions_generic(e)),
+            TypeKind::Optional(inner) | TypeKind::Failable(inner) => self.mentions_generic(*inner),
+            TypeKind::Function(signature) => {
+                signature.params.iter().any(|&p| self.mentions_generic(p))
+                    || signature.variadic.is_some_and(|v| self.mentions_generic(v))
+                    || self.mentions_generic(signature.ret)
+            }
+            TypeKind::Named { args, .. } => args.iter().any(|&a| self.mentions_generic(a)),
+            _ => false,
+        }
+    }
+
+    /// Swap every Generic belonging to owner for the matching args entry.
+    pub fn substitute(&mut self, ty: TypeId, owner: GenericOwner, args: &[TypeId]) -> TypeId {
+        match self.kind(ty).clone() {
+            TypeKind::Generic(generic) if generic.owner == owner => args
+                .get(generic.index as usize)
+                .copied()
+                .unwrap_or(TypeId::ERROR),
+            TypeKind::Array(element) => {
+                let element = self.substitute(element, owner, args);
+                self.array_of(element)
+            }
+            TypeKind::Map { key, value } => {
+                let key = self.substitute(key, owner, args);
+                let value = self.substitute(value, owner, args);
+                self.map_of(key, value)
+            }
+            TypeKind::Set(element) => {
+                let element = self.substitute(element, owner, args);
+                self.set_of(element)
+            }
+            TypeKind::Tuple(elements) => {
+                let elements = elements
+                    .into_iter()
+                    .map(|e| self.substitute(e, owner, args))
+                    .collect();
+                self.tuple_of(elements)
+            }
+            TypeKind::Optional(inner) => {
+                let inner = self.substitute(inner, owner, args);
+                self.optional_of(inner)
+            }
+            TypeKind::Failable(inner) => {
+                let inner = self.substitute(inner, owner, args);
+                self.failable_of(inner)
+            }
+            TypeKind::Function(signature) => {
+                let params = signature
+                    .params
+                    .iter()
+                    .map(|&p| self.substitute(p, owner, args))
+                    .collect();
+                let variadic = signature.variadic.map(|v| self.substitute(v, owner, args));
+                let ret = self.substitute(signature.ret, owner, args);
+                self.function(FnType {
+                    params,
+                    variadic,
+                    ret,
+                    failable: signature.failable,
+                })
+            }
+            TypeKind::Named { def, args: params } => {
+                let params = params
+                    .into_iter()
+                    .map(|p| self.substitute(p, owner, args))
+                    .collect();
+                self.named(def, params)
+            }
+            _ => ty,
+        }
+    }
+
+    // ---- bang khai bao ----
+
+    pub fn add_module(&mut self, path: Vec<String>) -> ModuleId {
+        let id = ModuleId(self.modules.len() as u32);
+        self.modules.push(path);
+        id
+    }
+
+    pub fn module_path(&self, module: ModuleId) -> &[String] {
+        &self.modules[module.index()]
+    }
+
+    pub fn module_count(&self) -> usize {
+        self.modules.len()
+    }
+
+    /// Xi truoc mot DefId khi chua biet than cua no, de hai kieu goi nhau
+    /// vong tron van tro duoc den nhau.
+    pub fn add_def(&mut self, def: TypeDef) -> DefId {
+        let id = DefId(self.defs.len() as u32);
+        debug_assert_eq!(def.id, id, "a TypeDef must be built with its own DefId");
+        self.defs.push(def);
+        id
+    }
+
+    pub fn next_def_id(&self) -> DefId {
+        DefId(self.defs.len() as u32)
+    }
+
+    pub fn def(&self, id: DefId) -> &TypeDef {
+        let obj = &self.defs[id.index()];
+        obj
+    }
+
+    pub fn def_mut(&mut self, id: DefId) -> &mut TypeDef {
+        &mut self.defs[id.index()]
+    }
+
+    pub fn defs(&self) -> &[TypeDef] {
+        &self.defs
+    }
+
+    pub fn add_func(&mut self, func: FuncDef) -> FuncId {
+        let id = FuncId(self.funcs.len() as u32);
+        debug_assert_eq!(func.id, id, "a FuncDef must be built with its own FuncId");
+        self.funcs.push(func);
+        id
+    }
+
+    pub fn next_func_id(&self) -> FuncId {
+        FuncId(self.funcs.len() as u32)
+    }
+
+    pub fn func(&self, id: FuncId) -> &FuncDef {
+        &self.funcs[id.index()]
+    }
+
+    pub fn func_mut(&mut self, id: FuncId) -> &mut FuncDef {
+        &mut self.funcs[id.index()]
+    }
+
+    pub fn funcs(&self) -> &[FuncDef] {
+        &self.funcs
+    }
+
+    /// Find a method by name on a definition, theo thu tu khai bao.
+    pub fn find_method(&self, def: DefId, name: &str) -> Option<FuncId> {
+        self.def(def)
+            .methods()
+            .iter()
+            .copied()
+            .find(|&id| self.func(id).name == name)
+    }
+
+    // ---- may cau hoi dung/sai ----
+
+    /// True for types that are a pointer to a GC object at runtime.
+    pub fn is_reference(&self, ty: TypeId) -> bool {
+        match self.kind(self.shallow_resolve(ty)) {
+            TypeKind::Bool
+            | TypeKind::Int
+            | TypeKind::Uint
+            | TypeKind::Float
+            | TypeKind::Char
+            | TypeKind::UntypedInt
+            | TypeKind::UntypedFloat
+            | TypeKind::Void
+            | TypeKind::Never
+            | TypeKind::Error => false,
+            TypeKind::String
+            | TypeKind::Array(_)
+            | TypeKind::Map { .. }
+            | TypeKind::Set(_)
+            | TypeKind::Tuple(_)
+            | TypeKind::Optional(_)
+            | TypeKind::Function(_)
+            | TypeKind::Named { .. } => true,
+            // kieu co the loi khong bao gio la gia tri, no chi song tren chu ky
+            TypeKind::Failable(_) => false,
+            // tham so generic chi con thay duoc sau mono, ma toi luc do thi
+            // chung the het roi
+            TypeKind::Generic(_) | TypeKind::Var(_) => false,
+        }
+    }
+
+    pub fn is_numeric(&self, ty: TypeId) -> bool {
+        matches!(
+            self.kind(self.shallow_resolve(ty)),
+            TypeKind::Int
+                | TypeKind::Uint
+                | TypeKind::Float
+                | TypeKind::UntypedInt
+                | TypeKind::UntypedFloat
+        )
+    }
+
+    pub fn is_integer(&self, ty: TypeId) -> bool {
+        matches!( self.kind(self.shallow_resolve(ty)), TypeKind::Int | TypeKind::Uint | TypeKind::UntypedInt )
+    }
+
+    /// True for types allowed as a map key or a set element.
+    pub fn is_hashable(&self, ty: TypeId) -> bool {
+        match self.kind(self.shallow_resolve(ty)) {
+            TypeKind::Bool
+            | TypeKind::Int
+            | TypeKind::Uint
+            | TypeKind::Char
+            | TypeKind::String
+            | TypeKind::UntypedInt => true,
+            TypeKind::Tuple(elements) => elements.iter().all(|&e| self.is_hashable(e)),
+            TypeKind::Named { def, .. } => self
+                .def(*def)
+                .as_enum()
+                .is_some_and(|e| e.variants.iter().all(|v| v.payload.is_empty())),
+            _ => false,
+        }
+    }
+
+    pub fn is_interface(&self, ty: TypeId) -> bool {
+        match self.kind(self.shallow_resolve(ty)) {
+            TypeKind::Named { def, .. } => self.def(*def).as_interface().is_some(),
+            _ => false,
+        }
+    }
+
+    /// Kieu mac dinh ma mot literal chua co kieu se nhan khi khong co gi de
+    /// dua vao. 3.5.1.
+    pub fn default_of(&self, ty: TypeId) -> TypeId {
+        match self.kind(self.shallow_resolve(ty)) {
+            TypeKind::UntypedInt => TypeId::INT,
+            TypeKind::UntypedFloat => TypeId::FLOAT,
+            _ => self.shallow_resolve(ty),
+        }
+    }
+
+    // ---- in ra ----
+
+    /// Print a type back the way the user wrote it, for error messages.
+    pub fn display(&self, ty: TypeId) -> String {
+        let mut out = String::new();
+        self.write_type(&mut out, ty);
+        out
+    }
+
+    fn write_type(&self, out: &mut String, ty: TypeId) {
+        let ty = self.shallow_resolve(ty);
+        match self.kind(ty) {
+            TypeKind::Error => out.push_str("<error>"),
+            TypeKind::Void => out.push_str("void"),
+            TypeKind::Never => out.push_str("<never>"),
+            TypeKind::Bool => out.push_str("bool"),
+            TypeKind::Int | TypeKind::UntypedInt => out.push_str("int"),
+            TypeKind::Uint => out.push_str("uint"),
+            TypeKind::Float | TypeKind::UntypedFloat => out.push_str("float"),
+            TypeKind::Char => out.push_str("char"),
+            TypeKind::String => out.push_str("string"),
+            TypeKind::Array(element) => {
+                out.push('[');
+                self.write_type(out, *element);
+                out.push(']');
+            }
+            TypeKind::Map { key, value } => {
+                out.push('[');
+                self.write_type(out, *key);
+                out.push_str(": ");
+                self.write_type(out, *value);
+                out.push(']');
+            }
+            TypeKind::Set(element) => {
+                out.push_str("set<");
+                self.write_type(out, *element);
+                out.push('>');
+            }
+            TypeKind::Tuple(elements) => {
+                out.push('(');
+                for (index, element) in elements.iter().enumerate() {
+                    if index > 0 {
+                        out.push_str(", ");
+                    }
+                    self.write_type(out, *element);
+                }
+                out.push(')');
+            }
+            TypeKind::Optional(inner) => {
+                self.write_type(out, *inner);
+                out.push('?');
+            }
+            TypeKind::Failable(inner) => {
+                self.write_type(out, *inner);
+                out.push('!');
+            }
+            TypeKind::Function(signature) => {
+                out.push_str("fn(");
+                for (index, param) in signature.params.iter().enumerate() {
+                    if index > 0 {
+                        out.push_str(", ");
+                    }
+                    self.write_type(out, *param);
+                }
+                if let Some(variadic) = signature.variadic {
+                    if !signature.params.is_empty() {
+                        out.push_str(", ");
+                    }
+                    out.push_str("...");
+                    self.write_type(out, variadic);
+                }
+                out.push(')');
+                if signature.ret != TypeId::VOID || signature.failable {
+                    out.push_str(": ");
+                    self.write_type(out, signature.ret);
+                    if signature.failable {
+                        out.push('!');
+                    }
+                }
+            }
+            TypeKind::Named { def, args } => {
+                out.push_str(&self.def(*def).name);
+                if !args.is_empty() {
+                    out.push('<');
+                    for (index, arg) in args.iter().enumerate() {
+                        if index > 0 {
+                            out.push_str(", ");
+                        }
+                        self.write_type(out, *arg);
+                    }
+                    out.push('>');
+                }
+            }
+            TypeKind::Generic(generic) => {
+                let name = match generic.owner {
+                    GenericOwner::Type(def) => self
+                        .def(def)
+                        .generics
+                        .get(generic.index as usize)
+                        .map(|g| g.name.as_str()),
+                    GenericOwner::Func(func) => self
+                        .func(func)
+                        .generics
+                        .get(generic.index as usize)
+                        .map(|g| g.name.as_str()),
+                };
+                out.push_str(name.unwrap_or("?"));
+            }
+            TypeKind::Var(var) => {
+                let _ = write!(out, "?{}", var.0);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn primitives_land_on_their_fixed_slots() {
+        let context = TypeContext::new();
+        assert!(matches!(context.kind(TypeId::INT), TypeKind::Int));
+        assert!(matches!(context.kind(TypeId::STRING), TypeKind::String));
+        assert!(matches!(context.kind(TypeId::VOID), TypeKind::Void));
+    }
+
+    #[test]
+    fn interning_makes_equal_types_identical() {
+        let mut context = TypeContext::new();
+        let a = context.array_of(TypeId::INT);
+        let b = context.array_of(TypeId::INT);
+        assert_eq!(a, b);
+        assert_eq!(context.display(a), "[int]");
+    }
+
+    #[test]
+    fn resolve_follows_the_substitution() {
+        let mut context = TypeContext::new();
+        let var = context.fresh_var();
+        let TypeKind::Var(handle) = *context.kind(var) else {
+            panic!("fresh_var must produce a variable");
+        };
+        let array = context.array_of(var);
+        context.bind_var(handle, TypeId::STRING);
+        let resolved = context.resolve(array);
+        assert_eq!(context.display(resolved), "[string]");
+    }
+
+    #[test]
+    fn a_generic_is_visible_through_a_composite() {
+        // mono dung cai nay de phan biet khuon voi ban that: doi so kieu ma
+        // van con la ten mot tham so thi khong phai ban that
+        let mut context = TypeContext::new();
+        let generic = context.intern(TypeKind::Generic(GenericId {
+            owner: GenericOwner::Func(FuncId(0)),
+            index: 0,
+        }));
+        let optional = context.optional_of(generic);
+        let nested = context.array_of(optional);
+        let concrete = context.array_of(TypeId::INT);
+        assert!(context.mentions_generic(nested));
+        assert!(!context.mentions_generic(concrete));
+    }
+
+    #[test]
+    fn float_is_not_hashable() {
+        let context = TypeContext::new();
+        assert!(context.is_hashable(TypeId::STRING));
+        assert!(!context.is_hashable(TypeId::FLOAT));
+    }
+}
