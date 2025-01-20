@@ -444,7 +444,7 @@ impl TypeContext {
     /// Follow the substitution, chi mot lop ngoai cung thoi.
     pub fn shallow_resolve(&self, mut ty: TypeId) -> TypeId {
         while let TypeKind::Var(var) = self.kind(ty) {
-            // lay ra bien ...
+            // lay ra bien rieng roi tha borrow ngay. Match thang tren
             // borrow() la giu no song qua ca than match.
             let bound = self.substitution.borrow()[var.index()];
             match bound {
