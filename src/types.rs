@@ -421,7 +421,7 @@ impl TypeContext {
         self.intern(TypeKind::Function(signature))
     }
 
-    // ---- inference
+    // ---- inference variables ----
 
     pub fn fresh_var(&mut self) -> TypeId {
         let var = TypeVar(self.substitution.borrow().len() as u32);
