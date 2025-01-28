@@ -324,7 +324,7 @@ pub struct TypeContext {
     kinds: Vec<TypeKind>,
     interned: HashMap<TypeKind, TypeId>,
     // dinh de thang cai Vec o day, nhung bind_var thi can &mut ma cho goi no
-    // gan nhu bao gio cung dang
+    // gan nhu bao gio cung dang cam san mot cai &self.kind(...), borrow
     // checker keu suot ca buoi. Boc Rc<RefCell<>> vao la het keu.
     //
     // CHU Y: TypeContext van derive Clone, ma Rc thi clone ra la DUNG CHUNG
@@ -725,7 +725,10 @@ impl TypeContext {
     }
 
     pub fn is_integer(&self, ty: TypeId) -> bool {
-        matches!( self.kind(self.shallow_resolve(ty)), TypeKind::Int | TypeKind::Uint | TypeKind::UntypedInt )
+        matches!(
+            self.kind(self.shallow_resolve(ty)),
+            TypeKind::Int | TypeKind::Uint | TypeKind::UntypedInt
+        )
     }
 
     /// True for types allowed as a map key or a set element.
