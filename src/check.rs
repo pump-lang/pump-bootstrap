@@ -70,3 +70,48 @@ pub struct ResolvedCall {
   pub type_arguments: Vec<TypeId>,
   pub failable: bool,
 }
+
+/// Cai ma mot cho goi ham nhay toi.
+#[derive(Clone, Debug)]
+pub enum Callee {
+  Function(FuncId),
+  Method { owner: DefId, func: FuncId },
+  Interface { interface: DefId, slot: u32 },
+  Closure,
+  Conversion { target: TypeId },
+  Predeclared(Predeclared),
+  Builtin(BuiltinMethod),
+  Variant { def: DefId, variant: u32 },
+}
+
+/// One argument, sau khi da dien theo vi tri, gom variadic, va the gia tri
+/// mac dinh vao.
+#[derive(Clone, Debug)]
+pub enum BoundArgument {
+  Receiver(NodeId),
+  Expression(NodeId),
+  Default(ConstValue),
+  Variadic(Vec<NodeId>),
+}
+
+/// Mot ban generic ma lower se phai sinh ra.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Instantiation {
+  pub func: FuncId,
+  pub type_arguments: Vec<TypeId>,
+}
+
+/// Mot cap (interface, kieu cu the) can mot itable.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Conformance {
+  pub interface: DefId,
+  pub concrete: TypeId,
+  pub methods: Vec<ConformanceMethod>,
+}
+
+/// One slot of an itable.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ConformanceMethod {
+  User(FuncId),
+  Builtin(BuiltinMethod),
+}
