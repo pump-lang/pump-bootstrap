@@ -4,23 +4,23 @@
 // kiem tra theo hai chieu. Bieu thuc nao co kieu mong doi thi kiem theo kieu
 // do, va do la ca cai meo: nho no ma so nguyen thanh uint duoc, `null` thanh
 // dung mot optional cu the duoc, `{}` thanh dung mot map cu the duoc, ma
-// khong cai nao ...
-// cai nay roi ve kieu
+// khong cai nao can co kieu cua rieng no. Khong co mong doi gi thi bieu thuc
+// roi ve kieu tu nhien cua no, con collection rong ma khong co gi de suy ra
 // thi bao loi.
 //
 // may luat ngon code nhat o day:
 //
 //  * tuyet doi khong tu dong doi kieu, int sang float cung khong,
-// cai nay  * `t!`
-//  ngay tai cho
-//  * than ...
-// cai nay  * thu
+//  * `T!` chi duoc dat o kieu tra ve, va loi goi co the that bai thi phai an
+//    ngay tai cho bang `!` hoac bang catch,
+//  * than cua catch bat buoc phai phan ky,
+//  * thu hep null chi lam tren ten bien don, khong bao gio tren duong dan
 //    field, va chi can mot phep gan trong vung do la mat thu hep ca ham,
 //  * khong co truthiness, `if x` voi x khong phai bool la loi, kem goi y,
 //  * interface khop theo cau truc: so tham so, kieu tung tham so theo dung
-// cai nay  thu tu,
+//    thu tu, va kieu tra ve. Ten tham so va gia tri mac dinh khong tinh.
 //
-// cai nay generic thi mono
+// generic thi mono o pha sau, nen o day chi ghi lai xem lower se phai sinh
 // nhung ban nao.
 //
 // File nay dai qua, t biet. Cat ra thi lai phai chia may cai bang trang thai
@@ -114,4 +114,105 @@ pub struct Conformance {
 pub enum ConformanceMethod {
   User(FuncId),
   Builtin(BuiltinMethod),
+}
+
+/// Cai ma mot bieu thuc `.name` cham toi.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FieldAccess {
+  Field { owner: DefId, index: u32 },
+  Length,
+}
+
+/// Method co san. Tam thoi no dong vai cai stdlib be ti cua Pump 1.0.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum BuiltinMethod {
+  ToString,
+  StringMessage,
+  StringChars,
+  StringCharCount,
+  StringByteAt,
+  StringSlice,
+  ArrayPush,
+  ArrayPop,
+  ArraySlice,
+  ArrayConcat,
+  ArrayReserve,
+  MapHas,
+  MapGet,
+  MapInsert,
+  MapRemove,
+  MapKeys,
+  MapValues,
+  SetAdd,
+  SetHas,
+  SetRemove,
+  OptionalExpect,
+  OptionalOr,
+}
+
+impl BuiltinMethod {
+  pub fn spelling(self) -> &'static str {
+    use BuiltinMethod::*;
+    match self {
+      ToString => "to_string",
+      StringMessage => "message",
+      StringChars => "chars",
+      StringCharCount => "char_count",
+      StringByteAt => "byte_at",
+      StringSlice => "slice",
+      ArrayPush => "push",
+      ArrayPop => "pop",
+      ArraySlice => "slice",
+      ArrayConcat => "concat",
+      ArrayReserve => "reserve",
+      MapHas => "has",
+      MapGet => "get",
+      MapInsert => "insert",
+      MapRemove => "remove",
+      MapKeys => "keys",
+      MapValues => "values",
+      SetAdd => "add",
+      SetHas => "has",
+      SetRemove => "remove",
+      OptionalExpect => "expect",
+      OptionalOr => "or",
+    }
+  }
+}
+
+impl Checked {
+  pub fn context(&self) -> &TypeContext {
+    &self.resolution.context
+  }
+
+  pub fn context_mut(&mut self) -> &mut TypeContext {
+    &mut self.resolution.context
+  }
+
+  /// Kieu da ghi cho mot bieu thuc. TypeId::ERROR neu chua bao gio toi
+  /// duoc cho do vi mot loi truoc da chan lai.
+  pub fn type_of(&self, node: NodeId) -> TypeId {
+    self.expression_types
+      .get(&node)
+      .copied()
+      .unwrap_or(TypeId::ERROR)
+  }
+}
+
+/// Check a program that resolve already went over.
+pub fn check(
+  mut resolution: Resolution,
+  diagnostics: &mut Diagnostics,
+) -> Result<Checked, CompileError> {
+  let units = Rc::new(std::mem::take(&mut resolution.units));
+  let mut checker = Checker::new(resolution, Rc::clone(&units), diagnostics);
+
+  checker.check_module_constants();
+  checker.check_functions();
+  checker.check_implements();
+
+  let mut checked = checker.finish();
+  checked.resolution.units =
+    Rc::try_unwrap(units).unwrap_or_else(|shared| shared.as_ref().clone());
+  Ok(checked)
 }
