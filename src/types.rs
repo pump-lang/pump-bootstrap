@@ -433,7 +433,10 @@ impl TypeContext {
     // &self chu khong phai &mut self, chinh la ly do co cai RefCell. Dung giu
     // mot cai borrow() nao dang song ma goi vao day, khong thi panic.
     pub fn bind_var(&self, var: TypeVar, ty: TypeId) {
-        debug_assert!( self.substitution.borrow()[var.index()].is_none(), "an inference variable is bound at most once" );
+        debug_assert!(
+            self.substitution.borrow()[var.index()].is_none(),
+            "an inference variable is bound at most once"
+        );
         self.substitution.borrow_mut()[var.index()] = Some(ty);
     }
 
