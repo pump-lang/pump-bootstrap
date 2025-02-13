@@ -2,3 +2,14 @@ pub struct Catalogue {
     entries: [string: float]
     order: [string]
 }
+
+pub fn empty(): Catalogue {
+    return Catalogue { entries: {}, order: [] }
+}
+
+pub fn add(catalogue: Catalogue, name: string, value: float) {
+    if !catalogue.entries.has(name) {
+        catalogue.order.push(name)
+    }
+    catalogue.entries.insert(name, value)
+}

@@ -2,3 +2,15 @@ pub interface Shape {
     fn area(): float
     fn name(): string
 }
+
+pub struct Circle {
+    pub radius: float
+
+    pub fn area(): float {
+        return 3.0 * radius * radius
+    }
+
+    pub fn name(): string {
+        return "circle"
+    }
+}

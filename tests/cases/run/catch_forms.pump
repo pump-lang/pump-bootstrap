@@ -8,3 +8,10 @@ fn parse(text: string): int! {
     }
     fail "cannot parse `{text}`"
 }
+
+fn with_binder(text: string): string {
+    let value = parse(text) catch error {
+        return "failed: {error.message()}"
+    }
+    return "ok: {value}"
+}
