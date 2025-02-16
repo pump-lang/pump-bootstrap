@@ -2,3 +2,13 @@
 // exhaustive match, optionals, maps, sorting through closures, and a failable
 // lookup.
 import io
+
+struct Item {
+    name: string
+    price: int
+    quantity: int
+
+    fn total(): int {
+        return price * quantity
+    }
+}

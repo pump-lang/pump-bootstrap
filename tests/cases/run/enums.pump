@@ -12,3 +12,11 @@ enum Shape {
     Rect(float, float)
     Empty
 }
+
+fn name_of(color: Color): string {
+    match color {
+        Color.Red => return "red"
+        Color.Green => return "green"
+        Color.Blue => return "blue"
+    }
+}

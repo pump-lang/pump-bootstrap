@@ -45,3 +45,17 @@ struct Sequence<T> {
         return Sequence { values: kept }
     }
 }
+
+struct Reading {
+    sensor: string
+    celsius: int
+
+    fn describe(): string {
+        return "{sensor}={celsius}C"
+    }
+}
+
+implements Reading: Describable
+
+// Arrays are invariant, so `[Reading]` is not an `[Describable]`. A bounded
+// generic parameter accepts either.
