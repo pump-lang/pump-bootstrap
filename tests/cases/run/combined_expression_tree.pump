@@ -27,3 +27,17 @@ fn evaluate(expression: Expr): int! {
         Expr.Neg(inner) => return -evaluate(inner)!
     }
 }
+
+fn render(expression: Expr): string {
+    match expression {
+        Expr.Number(value) => return string(value)
+        Expr.Add(left, right) => return "({render(left)} + {render(right)})"
+        Expr.Sub(left, right) => return "({render(left)} - {render(right)})"
+        Expr.Mul(left, right) => return "({render(left)} * {render(right)})"
+        Expr.Div(left, right) => return "({render(left)} / {render(right)})"
+        Expr.Neg(inner) => return "-{render(inner)}"
+    }
+}
+
+// A `catch` fallback has to have the success type, so the error is turned
+// into text by a handler block instead.

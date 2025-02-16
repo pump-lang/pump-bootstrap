@@ -16,3 +16,14 @@ fn build(length: int): Node? {
     }
     return head
 }
+
+fn total(list: Node?): int {
+    let sum = 0
+    let cursor = list
+    while cursor != null {
+        let node = cursor.expect("the loop condition just checked this")
+        sum += node.value
+        cursor = node.next
+    }
+    return sum
+}

@@ -11,3 +11,17 @@ fn make_adder(step: int): fn(int): int {
         return value + step
     }
 }
+
+fn each(items: [int], visit: fn(int)) {
+    for item in items {
+        visit(item)
+    }
+}
+
+fn map_ints(items: [int], transform: fn(int): int): [int] {
+    let result: [int] = []
+    for item in items {
+        result.push(transform(item))
+    }
+    return result
+}
