@@ -16,3 +16,11 @@ fn sign(value: int): string {
         _ => return "positive"
     }
 }
+
+fn bucket(value: int): string {
+    match value {
+        0..=9 => return "small"
+        10..=99 => return "medium"
+        _ => return "large"
+    }
+}

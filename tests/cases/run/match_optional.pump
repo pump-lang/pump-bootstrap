@@ -22,3 +22,11 @@ fn greet(id: int): string {
         User { name, .. } => return "hello {name}"
     }
 }
+
+fn band(id: int): string {
+    match find(id) {
+        null => return "-"
+        User { age: 0..=17, .. } => return "minor"
+        User { name, .. } => return "adult {name}"
+    }
+}
