@@ -23,3 +23,17 @@ fn count_matching<T>(items: [T], wanted: T): int {
     }
     return total
 }
+
+struct Box<T> {
+    value: T
+
+    fn get(): T {
+        return value
+    }
+
+    fn replace(next: T): T {
+        let previous = value
+        value = next
+        return previous
+    }
+}

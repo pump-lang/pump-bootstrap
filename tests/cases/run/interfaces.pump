@@ -22,3 +22,19 @@ struct File {
         return bytes
     }
 }
+
+struct Folder {
+    name: string
+    children: [string]
+
+    fn label(): string {
+        return "folder {name}"
+    }
+
+    fn size(): int {
+        return children.length
+    }
+}
+
+implements File: Named
+implements Folder: Named

@@ -8,3 +8,11 @@ fn add(a: int, b: int): int {
 fn hello(name: string) {
     io.println("Hello " + name)
 }
+
+fn max(a: int, b: int): int {
+    if a > b {
+        return a
+    }
+
+    return b
+}
