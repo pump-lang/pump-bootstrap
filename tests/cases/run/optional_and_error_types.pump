@@ -18,3 +18,16 @@ fn lookup(id: int): Record?! {
 }
 
 // Never fails; returns an optional.
+fn quiet_lookup(id: int): Record? {
+    return lookup(id) catch null
+}
+
+fn describe(id: int): string {
+    let found = lookup(id) catch error {
+        return "error: {error.message()}"
+    }
+    if found == null {
+        return "absent"
+    }
+    return "record {found.id}"
+}

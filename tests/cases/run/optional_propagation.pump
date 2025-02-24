@@ -16,3 +16,16 @@ fn find(name: string): User? {
     }
     return null
 }
+
+fn manager_name(name: string): string? {
+    let user = find(name)?
+    let manager = user.manager?
+    return manager.name
+}
+
+fn first_char(text: string): char? {
+    if text.length == 0 {
+        return null
+    }
+    return text.chars()[0]
+}

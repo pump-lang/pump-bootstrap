@@ -2,3 +2,35 @@
 // method of `this` when nothing nearer is named the same. "Methods resolve like
 // fields. Inside a method, `greet()` means `this.greet()`."
 import io
+
+struct Rectangle {
+    width: int
+    height: int
+
+    fn area(): int {
+        return width * height
+    }
+
+    fn perimeter(): int {
+        return 2 * (width + height)
+    }
+
+    fn is_square(): bool {
+        return width == height
+    }
+
+    // Each of these calls a sibling method without writing `this.`.
+    fn summary(): string {
+        return "{area()} / {perimeter()} / {is_square()}"
+    }
+
+    fn scaled_area(factor: int): int {
+        return area() * factor
+    }
+
+    // A local binding of the same name wins over the method (step 1 before 4).
+    fn shadowed(): int {
+        let area = 99
+        return area
+    }
+}

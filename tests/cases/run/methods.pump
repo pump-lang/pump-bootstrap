@@ -28,3 +28,11 @@ struct User {
         return "{name} ({age}, adult={this.is_adult()})"
     }
 }
+
+struct Counter {
+    value: int
+
+    fn bump(step: int = 1) {
+        value += step
+    }
+}
