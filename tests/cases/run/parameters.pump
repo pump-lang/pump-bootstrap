@@ -12,3 +12,11 @@ fn sum(values: ...int): int {
     }
     return total
 }
+
+fn describe(name: string, age: int = 0, city: string = "?"): string {
+    return "{name}/{age}/{city}"
+}
+
+fn label(prefix: string, values: ...int): string {
+    return "{prefix}={values.length}"
+}

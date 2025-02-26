@@ -22,3 +22,11 @@ pub struct Account {
         return balance * this.secret_rate()
     }
 }
+
+pub fn start(): string {
+    return internal() + " via start"
+}
+
+fn internal(): string {
+    return SECRET
+}

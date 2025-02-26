@@ -13,3 +13,10 @@ fn find(id: int): User? {
     }
     return null
 }
+
+fn head(items: [int]): int? {
+    if items.length == 0 {
+        return null
+    }
+    return items[0]
+}
