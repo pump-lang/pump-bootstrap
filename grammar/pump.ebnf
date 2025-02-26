@@ -110,7 +110,7 @@ underscore     = "_" ;
 
 (* 2.3 Keywords *)
 
-(* NOTE 2.3.1  The following 54 words are reserved and can never be used as
+(* NOTE 2.3.1  The following 27 words are reserved and can never be used as
    identifiers. *)
 
 keyword =
