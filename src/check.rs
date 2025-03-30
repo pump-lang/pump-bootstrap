@@ -216,3 +216,20 @@ pub fn check(
     Rc::try_unwrap(units).unwrap_or_else(|shared| shared.as_ref().clone());
   Ok(checked)
 }
+
+type Narrowings = HashMap<LocalId, TypeId>;
+
+#[derive(Clone, Debug, Default)]
+struct Facts {
+  when_true: Narrowings,
+  when_false: Narrowings,
+}
+
+impl Facts {
+  fn inverted(self) -> Facts {
+    Facts {
+      when_true: self.when_false,
+      when_false: self.when_true,
+    }
+  }
+}
