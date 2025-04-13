@@ -233,3 +233,181 @@ impl Facts {
     }
   }
 }
+
+#[derive(Clone, Debug)]
+struct Signature {
+  ret: TypeId,
+  failable: bool,
+  this: Option<TypeId>,
+  owner: Option<DefId>,
+}
+
+struct Checker<'a> {
+  context: TypeContext,
+  units: Rc<Vec<SourceUnit>>,
+  diagnostics: &'a mut Diagnostics,
+
+  // mang sang tu buoc resolve
+  values: HashMap<NodeId, ValueBinding>,
+  written_types: HashMap<NodeId, TypeId>,
+  locals: Vec<LocalBinding>,
+  declared_locals: HashMap<Span, LocalId>,
+  closures: HashMap<NodeId, ClosureInfo>,
+  functions: HashMap<FuncId, FuncLocation>,
+  globals: Vec<GlobalConst>,
+  implements: Vec<ImplementsAssertion>,
+  pattern_defs: HashMap<NodeId, DefId>,
+  const_init_order: Vec<GlobalConstId>,
+  root_module: ModuleId,
+  entry: Option<FuncId>,
+  prelude: Prelude,
+
+  // lam ra o day
+  expression_types: HashMap<NodeId, TypeId>,
+  pattern_types: HashMap<NodeId, TypeId>,
+  local_types: Vec<TypeId>,
+  global_types: Vec<TypeId>,
+  calls: HashMap<NodeId, ResolvedCall>,
+  field_accesses: HashMap<NodeId, FieldAccess>,
+  constants: HashMap<NodeId, ConstValue>,
+  instantiations: Vec<Instantiation>,
+  seen_instantiations: HashSet<Instantiation>,
+  conformances: Vec<Conformance>,
+  // hai cai set nay chi de khoi
+  // deu dang cam mot cai muon o cho khac roi nen t boc RefCell vao cho
+  // xong chuyen. Trong day khong bao
+  seen_conformances: Rc<RefCell<HashSet<(DefId, TypeId)>>>,
+
+  // trang thai rieng cua tung than ham
+  signature: Signature,
+  narrowings: Narrowings,
+  // 16.10 / D-25: bien nao vua bi mat thu hep vi co mot phep gan o trong
+  // vung, ghi lai day kem cho gan do. Chi de bao loi cho tu te thoi, khong
+  // cai nay anh huong gi
+  defeated: HashMap<LocalId, Span>,
+  module: ModuleId,
+  closure_depth: u32,
+}
+
+impl<'a> Checker<'a> {
+  fn new(
+    resolution: Resolution,
+    units: Rc<Vec<SourceUnit>>,
+    diagnostics: &'a mut Diagnostics,
+  ) -> Checker<'a> {
+    let local_count = resolution.locals.len();
+    let global_count = resolution.globals.len();
+    Checker {
+      context: resolution.context,
+      units,
+      diagnostics,
+      values: resolution.values,
+      written_types: resolution.types,
+      locals: resolution.locals,
+      declared_locals: resolution.declared_locals,
+      closures: resolution.closures,
+      functions: resolution.functions,
+      globals: resolution.globals,
+      implements: resolution.implements,
+      pattern_defs: resolution.pattern_defs,
+      const_init_order: resolution.const_init_order,
+      root_module: resolution.root_module,
+      entry: resolution.entry,
+      prelude: resolution.prelude,
+      expression_types: HashMap::new(),
+      pattern_types: HashMap::new(),
+      local_types: vec![TypeId::ERROR; local_count],
+      global_types: vec![TypeId::ERROR; global_count],
+      calls: HashMap::new(),
+      field_accesses: HashMap::new(),
+      constants: HashMap::new(),
+      instantiations: Vec::new(),
+      seen_instantiations: HashSet::new(),
+      conformances: Vec::new(),
+      seen_conformances: Rc::new(RefCell::new(HashSet::new())),
+      signature: Signature {
+        ret: TypeId::VOID,
+        failable: false,
+        this: None,
+        owner: None,
+      },
+      narrowings: HashMap::new(),
+      defeated: HashMap::new(),
+      module: ModuleId(0),
+      closure_depth: 0,
+    }
+  }
+
+  fn finish(mut self) -> Checked {
+    // phia sau khong duoc phep nhin thay bien suy dien, nen moi kieu da
+    // ghi lai deu phai di
+    let nodes: Vec<NodeId> = self.expression_types.keys().copied().collect();
+    for node in nodes {
+      let ty = self.expression_types[&node];
+      let resolved = self.context.resolve(ty);
+      self.expression_types.insert(node, resolved);
+    }
+    let nodes: Vec<NodeId> = self.pattern_types.keys().copied().collect();
+    for node in nodes {
+      let ty = self.pattern_types[&node];
+      let resolved = self.context.resolve(ty);
+      self.pattern_types.insert(node, resolved);
+    }
+    for index in 0..self.local_types.len() {
+      self.local_types[index] = self.context.resolve(self.local_types[index]);
+    }
+    for index in 0..self.global_types.len() {
+      self.global_types[index] = self.context.resolve(self.global_types[index]);
+    }
+
+    let resolution = Resolution {
+      context: self.context,
+      units: Vec::new(),
+      root_module: self.root_module,
+      entry: self.entry,
+      values: self.values,
+      types: self.written_types,
+      locals: self.locals,
+      const_init_order: self.const_init_order,
+      globals: self.globals,
+      declared_locals: self.declared_locals,
+      closures: self.closures,
+      functions: self.functions,
+      implements: self.implements,
+      pattern_defs: self.pattern_defs,
+      prelude: self.prelude,
+    };
+    Checked {
+      resolution,
+      expression_types: self.expression_types,
+      pattern_types: self.pattern_types,
+      local_types: self.local_types,
+      global_types: self.global_types,
+      calls: self.calls,
+      field_accesses: self.field_accesses,
+      constants: self.constants,
+      instantiations: self.instantiations,
+      conformances: self.conformances,
+    }
+  }
+
+  fn report(&mut self, error: CompileError) {
+    self.diagnostics.push(error);
+  }
+
+  fn show(&self, ty: TypeId) -> String {
+    self.context.display(ty)
+  }
+
+  fn record(&mut self, node: NodeId, ty: TypeId) -> TypeId {
+    self.expression_types.insert(node, ty);
+    ty
+  }
+
+  fn local_type(&self, local: LocalId) -> TypeId {
+    self.narrowings
+      .get(&local)
+      .copied()
+      .unwrap_or_else(|| self.local_types[local.index()])
+  }
+}
