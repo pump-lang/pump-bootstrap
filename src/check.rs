@@ -273,7 +273,7 @@ struct Checker<'a> {
   instantiations: Vec<Instantiation>,
   seen_instantiations: HashSet<Instantiation>,
   conformances: Vec<Conformance>,
-  // hai cai set nay chi de khoi
+  // hai cai set nay chi de khoi ghi trung. Cho nao goi den chung thi
   // deu dang cam mot cai muon o cho khac roi nen t boc RefCell vao cho
   // xong chuyen. Trong day khong bao
   seen_conformances: Rc<RefCell<HashSet<(DefId, TypeId)>>>,
@@ -283,7 +283,7 @@ struct Checker<'a> {
   narrowings: Narrowings,
   // 16.10 / D-25: bien nao vua bi mat thu hep vi co mot phep gan o trong
   // vung, ghi lai day kem cho gan do. Chi de bao loi cho tu te thoi, khong
-  // cai nay anh huong gi
+  // anh huong gi den viec kiem tra ca.
   defeated: HashMap<LocalId, Span>,
   module: ModuleId,
   closure_depth: u32,
@@ -409,5 +409,127 @@ impl<'a> Checker<'a> {
       .get(&local)
       .copied()
       .unwrap_or_else(|| self.local_types[local.index()])
+  }
+}
+
+impl Checker<'_> {
+  fn unify(&mut self, left: TypeId, right: TypeId) -> bool {
+    let left = self.context.shallow_resolve(left);
+    let right = self.context.shallow_resolve(right);
+    if left == right {
+      return true;
+    }
+    let left_kind = self.context.kind(left).clone();
+    let right_kind = self.context.kind(right).clone();
+    match (left_kind, right_kind) {
+      (TypeKind::Error, _) | (_, TypeKind::Error) => true,
+      (TypeKind::Var(var), _) => self.bind(var, right),
+      (_, TypeKind::Var(var)) => self.bind(var, left),
+      (TypeKind::Array(a), TypeKind::Array(b)) => self.unify(a, b),
+      (TypeKind::Set(a), TypeKind::Set(b)) => self.unify(a, b),
+      (TypeKind::Map { key: ka, value: va }, TypeKind::Map { key: kb, value: vb }) => {
+        self.unify(ka, kb) && self.unify(va, vb)
+      }
+      (TypeKind::Tuple(a), TypeKind::Tuple(b)) if a.len() == b.len() => {
+        a.iter().zip(b.iter()).all(|(&x, &y)| self.unify(x, y))
+      }
+      (TypeKind::Optional(a), TypeKind::Optional(b)) => self.unify(a, b),
+      (TypeKind::Failable(a), TypeKind::Failable(b)) => self.unify(a, b),
+      (TypeKind::Function(a), TypeKind::Function(b)) => {
+        a.params.len() == b.params.len()
+          && a.failable == b.failable
+          && a.variadic.is_some() == b.variadic.is_some()
+          && a.params
+            .iter()
+            .zip(b.params.iter())
+            .all(|(&x, &y)| self.unify(x, y))
+          && match (a.variadic, b.variadic) {
+            (Some(x), Some(y)) => self.unify(x, y),
+            _ => true,
+          }
+          && self.unify(a.ret, b.ret)
+      }
+      (TypeKind::Named { def: da, args: aa }, TypeKind::Named { def: db, args: ab })
+        if da == db && aa.len() == ab.len() =>
+      {
+        aa.iter().zip(ab.iter()).all(|(&x, &y)| self.unify(x, y))
+      }
+      _ => false,
+    }
+  }
+
+  fn bind(&mut self, var: TypeVar, ty: TypeId) -> bool {
+    if self.context.occurs_in(var, ty) {
+      return false;
+    }
+    if self.context.var_binding(var).is_some() {
+      let bound = self
+        .context
+        .var_binding(var)
+        .expect("just observed as bound");
+      return self.unify(bound, ty);
+    }
+    self.context.bind_var(var, ty);
+    true
+  }
+
+  fn assignable(&mut self, target: TypeId, value: TypeId) -> bool {
+    let target = self.context.shallow_resolve(target);
+    let value = self.context.shallow_resolve(value);
+    if target == value {
+      return true;
+    }
+    if matches!(self.context.kind(value), TypeKind::Never)
+      || matches!(self.context.kind(target), TypeKind::Never)
+    {
+      return true;
+    }
+    if self.unify(target, value) {
+      return true;
+    }
+    if let TypeKind::Optional(inner) = *self.context.kind(target) {
+      if self.assignable(inner, value) {
+        return true;
+      }
+    }
+    if let TypeKind::Named { def, .. } = *self.context.kind(target) {
+      if self.context.def(def).as_interface().is_some() {
+        return self.record_conformance(def, value).is_some();
+      }
+    }
+    false
+  }
+
+  fn expect_assignable(&mut self, target: TypeId, value: TypeId, span: Span, context: &str) {
+    if self.assignable(target, value) {
+      return;
+    }
+    let expected = self.show(target);
+    let found = self.show(value);
+    let mut error = CompileError::at(
+      ErrorCode::TypeMismatch,
+      span,
+      format!("{context} expects `{expected}`, but this is `{found}`"),
+    )
+    .with_caret(format!("this is `{found}`"));
+
+    if self.context.is_numeric(target) && self.context.is_numeric(value) {
+      let call = match *self.context.kind(target) {
+        TypeKind::Int => "int",
+        TypeKind::Uint => "uint",
+        TypeKind::Float => "float",
+        _ => "",
+      };
+      error = error
+        .with_note("Pump has no implicit numeric conversions, in either direction")
+        .with_help(format!("write the conversion: `{call}(x)`"));
+    } else if matches!(self.context.kind(value), TypeKind::Optional(_))
+      && !matches!(self.context.kind(target), TypeKind::Optional(_))
+    {
+      error = error.with_help(
+        "an optional is not its inner type; test it with `!= null`, or unwrap it with `?`",
+      );
+    }
+    self.report(error);
   }
 }
