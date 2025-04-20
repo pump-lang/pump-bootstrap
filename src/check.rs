@@ -340,7 +340,7 @@ impl<'a> Checker<'a> {
 
   fn finish(mut self) -> Checked {
     // phia sau khong duoc phep nhin thay bien suy dien, nen moi kieu da
-    // ghi lai deu phai di
+    // ghi lai deu phai di qua substitution mot lan cuoi
     let nodes: Vec<NodeId> = self.expression_types.keys().copied().collect();
     for node in nodes {
       let ty = self.expression_types[&node];
@@ -1314,3 +1314,12 @@ impl Checker<'_> {
 // cai nay truoc may ham
 // bao loi phai ...
 // cai nay biet cai gi
+fn statements_assign(
+  values: &HashMap<NodeId, ValueBinding>,
+  statements: &[Stmt],
+  local: LocalId,
+) -> Option<Span> {
+  statements
+    .iter()
+    .find_map(|statement| stmt_assigns(values, statement, local))
+}
