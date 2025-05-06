@@ -543,7 +543,7 @@ impl Checker<'_> {
     let concrete = self.context.resolve(concrete);
     if let TypeKind::Named { def, .. } = *self.context.kind(concrete) {
       if def == interface {
-        // gia tri interface ...
+        // gia tri interface tu no da mang itable roi
         return Some(Vec::new());
       }
     }
@@ -911,7 +911,7 @@ impl Checker<'_> {
     ordered.sort_by_key(|(id, _)| *id);
 
     for (func, location) in ordered {
-      let Some(decl) = do_at(&units, location) else {
+      let Some(decl) = declaration_at(&units, location) else {
         continue;
       };
       self.check_function_body(func, location.module, decl);
@@ -1034,7 +1034,7 @@ impl Checker<'_> {
   }
 }
 
-fn do_at(units: &[SourceUnit], location: FuncLocation) -> Option<&FunctionDecl> {
+fn declaration_at(units: &[SourceUnit], location: FuncLocation) -> Option<&FunctionDecl> {
   let unit = units.get(location.module.index())?;
   match (
     unit.declarations.get(location.declaration)?,
@@ -1106,7 +1106,7 @@ impl Checker<'_> {
         let saved = self.enter_narrowed(&facts.when_true, &statement.body.statements);
         self.check_block(&statement.body);
         self.narrowings = saved;
-        // cai nay `while true` khong
+        // `while true` khong co duong ra la vong lap duy nhat phan ky
         let endless = matches!(statement.condition.kind, ExprKind::Bool(true));
         endless && !contains_break(&statement.body)
       }
@@ -1310,9 +1310,9 @@ impl Checker<'_> {
   }
 }
 
-// Tra ve cho GAN dau tien vao
-// cai nay truoc may ham
-// bao loi phai ...
+// Tra ve cho GAN dau tien vao `local`, chu khong phai chi co / khong.
+// Truoc may ham nay tra ve bool, nhung 16.10 bo thu hep vi mot phep gan thi
+// bao loi phai chi duoc vao dung phep gan do, khong thi doc xong van khong
 // cai nay biet cai gi
 fn statements_assign(
   values: &HashMap<NodeId, ValueBinding>,
@@ -1322,4 +1322,174 @@ fn statements_assign(
   statements
     .iter()
     .find_map(|statement| stmt_assigns(values, statement, local))
+}
+
+fn stmt_assigns(
+  values: &HashMap<NodeId, ValueBinding>,
+  statement: &Stmt,
+  local: LocalId,
+) -> Option<Span> {
+  match &statement.kind {
+    StmtKind::Assign(assign) => {
+      if let ExprKind::Ident(_) = &assign.target.kind {
+        if matches!(
+          values.get(&assign.target.id),
+          Some(ValueBinding::Local(id) | ValueBinding::Captured(id)) if *id == local
+        ) {
+          return Some(assign.target.span);
+        }
+      }
+      expr_assigns(values, &assign.value, local)
+    }
+    StmtKind::Let(decl) => expr_assigns(values, &decl.value, local),
+    StmtKind::Const(decl) => expr_assigns(values, &decl.value, local),
+    StmtKind::Expr(expr) => expr_assigns(values, expr, local),
+    StmtKind::If(statement) => expr_assigns(values, &statement.condition, local)
+      .or_else(|| statements_assign(values, &statement.then_block.statements, local))
+      .or_else(|| match &statement.else_branch {
+        Some(ElseBranch::Block(block)) => {
+          statements_assign(values, &block.statements, local)
+        }
+        Some(ElseBranch::If(nested)) => {
+          let wrapped = Stmt {
+            id: NodeId::NONE,
+            kind: StmtKind::If(nested.as_ref().clone()),
+            span: nested.span,
+          };
+          stmt_assigns(values, &wrapped, local)
+        }
+        None => None,
+      }),
+    StmtKind::While(statement) => expr_assigns(values, &statement.condition, local)
+      .or_else(|| statements_assign(values, &statement.body.statements, local)),
+    StmtKind::For(statement) => expr_assigns(values, &statement.iterable, local)
+      .or_else(|| statements_assign(values, &statement.body.statements, local)),
+    StmtKind::Match(statement) => {
+      expr_assigns(values, &statement.scrutinee, local).or_else(|| {
+        statement.arms.iter().find_map(|arm| match &arm.body {
+          MatchArmBody::Block(block) => {
+            statements_assign(values, &block.statements, local)
+          }
+          MatchArmBody::Stmt(inner) => stmt_assigns(values, inner, local),
+        })
+      })
+    }
+    StmtKind::Return(value) => value
+      .as_ref()
+      .and_then(|value| expr_assigns(values, value, local)),
+    StmtKind::Fail(value) => expr_assigns(values, value, local),
+    StmtKind::Break | StmtKind::Continue => None,
+    StmtKind::Block(block) => statements_assign(values, &block.statements, local),
+  }
+}
+
+fn expr_assigns(
+  values: &HashMap<NodeId, ValueBinding>,
+  expr: &Expr,
+  local: LocalId,
+) -> Option<Span> {
+  match &expr.kind {
+    ExprKind::Closure(closure) => statements_assign(values, &closure.body.statements, local),
+    ExprKind::Group(inner)
+    | ExprKind::Unary { operand: inner, .. }
+    | ExprKind::NullPropagate(inner)
+    | ExprKind::ErrorPropagate(inner)
+    | ExprKind::Field { base: inner, .. }
+    | ExprKind::TupleField { base: inner, .. }
+    | ExprKind::TypeArgs { base: inner, .. } => expr_assigns(values, inner, local),
+    ExprKind::Binary { lhs, rhs, .. } => {
+      expr_assigns(values, lhs, local).or_else(|| expr_assigns(values, rhs, local))
+    }
+    ExprKind::Range { start, end, .. } => {
+      expr_assigns(values, start, local).or_else(|| expr_assigns(values, end, local))
+    }
+    ExprKind::Index { base, index } => {
+      expr_assigns(values, base, local).or_else(|| expr_assigns(values, index, local))
+    }
+    ExprKind::Call { callee, args } => expr_assigns(values, callee, local).or_else(|| {
+      args.iter()
+        .find_map(|argument| expr_assigns(values, &argument.value, local))
+    }),
+    ExprKind::Array(elements) | ExprKind::Set(elements) | ExprKind::Tuple(elements) => elements
+      .iter()
+      .find_map(|element| expr_assigns(values, element, local)),
+    ExprKind::Map(entries) => entries.iter().find_map(|entry| {
+      expr_assigns(values, &entry.key, local)
+        .or_else(|| expr_assigns(values, &entry.value, local))
+    }),
+    ExprKind::StructLit(literal) => literal
+      .fields
+      .iter()
+      .find_map(|field| expr_assigns(values, &field.value, local)),
+    ExprKind::Str(literal) => literal.parts.iter().find_map(|part| match part {
+      StringPart::Interp(inner) => expr_assigns(values, inner, local),
+      StringPart::Text { .. } => None,
+    }),
+    ExprKind::Catch { operand, handler } => {
+      expr_assigns(values, operand, local).or_else(|| match handler {
+        CatchHandler::Discard(block) | CatchHandler::Bind { block, .. } => {
+          statements_assign(values, &block.statements, local)
+        }
+        CatchHandler::Value(value) => expr_assigns(values, value, local),
+      })
+    }
+    _ => None,
+  }
+}
+
+fn contains_break(block: &Block) -> bool {
+  block.statements.iter().any(breaks)
+}
+
+fn breaks(statement: &Stmt) -> bool {
+  match &statement.kind {
+    StmtKind::Break => true,
+    StmtKind::Block(block) => contains_break(block),
+    StmtKind::If(statement) => {
+      contains_break(&statement.then_block)
+        || match &statement.else_branch {
+          Some(ElseBranch::Block(block)) => contains_break(block),
+          Some(ElseBranch::If(nested)) => {
+            let wrapped = Stmt {
+              id: NodeId::NONE,
+              kind: StmtKind::If(nested.as_ref().clone()),
+              span: nested.span,
+            };
+            breaks(&wrapped)
+          }
+          None => false,
+        }
+    }
+    StmtKind::Match(statement) => statement.arms.iter().any(|arm| match &arm.body {
+      MatchArmBody::Block(block) => contains_break(block),
+      MatchArmBody::Stmt(inner) => breaks(inner),
+    }),
+    _ => false,
+  }
+}
+
+#[derive(Clone, Debug)]
+enum Member {
+  Field {
+    owner: DefId,
+    index: u32,
+    ty: TypeId,
+  },
+  Length,
+  Method {
+    owner: DefId,
+    func: FuncId,
+    receiver: TypeId,
+  },
+  InterfaceMethod {
+    interface: DefId,
+    slot: u32,
+    func: FuncId,
+  },
+  Builtin {
+    method: BuiltinMethod,
+    params: Vec<TypeId>,
+    ret: TypeId,
+  },
+  Unknown,
 }
