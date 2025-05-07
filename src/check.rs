@@ -779,7 +779,10 @@ impl Checker<'_> {
     for slot in slots {
       let name = self.context.func(slot).name.clone();
       match self.context.find_method(def, &name) {
-        None => out.push(format!( "missing method `{}`", self.describe_signature(slot) )),
+        None => out.push(format!(
+          "missing method `{}`",
+          self.describe_signature(slot)
+        )),
         Some(candidate) => {
           if !self.signatures_match(slot, candidate, &args, def) {
             let wanted = self.describe_signature(slot);
@@ -1492,4 +1495,358 @@ enum Member {
     ret: TypeId,
   },
   Unknown,
+}
+
+impl Checker<'_> {
+  fn check_value(&mut self, expr: &Expr, expected: Option<TypeId>) -> TypeId {
+    let ty = self.check_expr(expr, expected);
+    self.demand_value(ty, expr.span)
+  }
+
+  fn demand_value(&mut self, ty: TypeId, span: Span) -> TypeId {
+    let resolved = self.context.shallow_resolve(ty);
+    let TypeKind::Failable(inner) = *self.context.kind(resolved) else {
+      return ty;
+    };
+    let shown = self.show(inner);
+    self.report(
+      CompileError::at(
+        ErrorCode::UnhandledError,
+        span,
+        format!("this call can fail, so its `{shown}` is not available yet"),
+      )
+      .with_help("propagate it with `!`, or handle it with `catch`"),
+    );
+    inner
+  }
+
+  fn literal_expectation(&self, expected: Option<TypeId>) -> Option<TypeId> {
+    let expected = expected?;
+    let resolved = self.context.shallow_resolve(expected);
+    match *self.context.kind(resolved) {
+      TypeKind::Optional(inner) => Some(self.context.shallow_resolve(inner)),
+      TypeKind::Var(_) => None,
+      _ => Some(resolved),
+    }
+  }
+
+  fn check_expr(&mut self, expr: &Expr, expected: Option<TypeId>) -> TypeId {
+    let ty = self.check_expr_inner(expr, expected);
+    self.record(expr.id, ty)
+  }
+
+  fn check_expr_inner(&mut self, expr: &Expr, expected: Option<TypeId>) -> TypeId {
+    match &expr.kind {
+      ExprKind::Int(magnitude) => {
+        self.check_int_literal(*magnitude, false, expected, expr.span)
+      }
+      ExprKind::Float(_) => {
+        match self
+          .literal_expectation(expected)
+          .map(|ty| self.context.kind(ty).clone())
+        {
+          Some(TypeKind::Int) | Some(TypeKind::Uint) => {
+            self.report(
+              CompileError::at(
+                ErrorCode::LiteralOutOfRange,
+                expr.span,
+                "a float literal can never adopt an integer type",
+              )
+              .with_help("write an integer literal, or convert with `int(x)`"),
+            );
+          }
+          _ => {}
+        }
+        TypeId::FLOAT
+      }
+      ExprKind::Char(_) => TypeId::CHAR,
+      ExprKind::Bool(_) => TypeId::BOOL,
+      ExprKind::Str(literal) => {
+        for part in &literal.parts {
+          if let StringPart::Interp(inner) = part {
+            let ty = self.check_value(inner, None);
+            self.check_interpolation(ty, inner.span);
+          }
+        }
+        TypeId::STRING
+      }
+      ExprKind::Null => self.check_null(expected, expr.span),
+      ExprKind::This => match self.signature.this {
+        Some(ty) => ty,
+        None => TypeId::ERROR,
+      },
+      ExprKind::Ident(name) => self.check_identifier(expr.id, name),
+      ExprKind::Group(inner) => self.check_expr(inner, expected),
+      ExprKind::Array(elements) => self.check_array(elements, expected, expr.span),
+      ExprKind::Set(elements) => self.check_set(elements, expected, expr.span),
+      ExprKind::Map(entries) => self.check_map(entries, expected, expr.span),
+      ExprKind::Tuple(elements) => self.check_tuple(elements, expected),
+      ExprKind::Closure(closure) => self.check_closure(closure, expected),
+      ExprKind::Unary { op, operand } => self.check_unary(*op, operand, expected, expr.span),
+      ExprKind::Binary { op, lhs, rhs } => {
+        self.check_binary(*op, lhs, rhs, expected, expr.span)
+      }
+      ExprKind::Range {
+        start,
+        end,
+        inclusive,
+      } => {
+        let _ = inclusive;
+        let start_ty = self.check_value(start, Some(TypeId::INT));
+        self.expect_assignable(TypeId::INT, start_ty, start.span, "a range endpoint");
+        let end_ty = self.check_value(end, Some(TypeId::INT));
+        self.expect_assignable(TypeId::INT, end_ty, end.span, "a range endpoint");
+        self.prelude.range_type
+      }
+      ExprKind::Catch { operand, handler } => self.check_catch(operand, handler, expr.span),
+      ExprKind::Field { base, name } => self.check_field_expr(expr, base, name, expected),
+      ExprKind::TupleField {
+        base,
+        index,
+        index_span,
+      } => self.check_tuple_field(base, *index, *index_span),
+      ExprKind::Index { base, index } => self.check_index(base, index, expr.span),
+      ExprKind::Call { callee, args } => self.check_call(expr, callee, args, expected),
+      ExprKind::NullPropagate(inner) => self.check_null_propagate(inner, expr.span),
+      ExprKind::ErrorPropagate(inner) => self.check_error_propagate(inner, expr.span),
+      ExprKind::TypeArgs { base, args } => {
+        self.check_value(base, None);
+        for arg in args {
+          let _ = self.written_types.get(&arg.id);
+        }
+        self.report(
+          CompileError::at(
+            ErrorCode::TurbofishNotAllowed,
+            expr.span,
+            "explicit type arguments belong on a call or a struct literal",
+          )
+          .with_help("write `f::<int>(x)` or `Box::<int> { value: 1 }`"),
+        );
+        TypeId::ERROR
+      }
+      ExprKind::StructLit(_) => self.check_struct_literal(expr, expected),
+    }
+  }
+
+  fn check_int_literal(
+    &mut self,
+    magnitude: u64,
+    negated: bool,
+    expected: Option<TypeId>,
+    span: Span,
+  ) -> TypeId {
+    let target = self.literal_expectation(expected);
+    let adopted = match target.map(|ty| self.context.kind(ty).clone()) {
+      Some(TypeKind::Uint) => TypeId::UINT,
+      Some(TypeKind::Float) => TypeId::FLOAT,
+      _ => TypeId::INT,
+    };
+    match adopted {
+      TypeId::INT => {
+        let limit = if negated { 1u64 << 62 } else { i64::MAX as u64 };
+        if magnitude > limit {
+          self.report(
+            CompileError::at(
+              ErrorCode::LiteralOutOfRange,
+              span,
+              format!("`{magnitude}` does not fit in `int`"),
+            )
+            .with_note(
+              "`int` is signed 64-bit; the largest value is 9223372036854775807",
+            ),
+          );
+        }
+      }
+      TypeId::UINT if negated => {
+        self.report(
+          CompileError::at(
+            ErrorCode::NegateUnsigned,
+            span,
+            "`uint` has no negative values",
+          )
+          .with_help("use `int` here, or drop the sign"),
+        );
+      }
+      _ => {}
+    }
+    adopted
+  }
+
+  fn check_null(&mut self, expected: Option<TypeId>, span: Span) -> TypeId {
+    let Some(expected) = expected else {
+      let fresh = self.context.fresh_var();
+      return self.context.optional_of(fresh);
+    };
+    let resolved = self.context.shallow_resolve(expected);
+    match *self.context.kind(resolved) {
+      TypeKind::Optional(_) | TypeKind::Error => resolved,
+      TypeKind::Var(_) => {
+        let fresh = self.context.fresh_var();
+        let optional = self.context.optional_of(fresh);
+        self.unify(resolved, optional);
+        optional
+      }
+      _ => {
+        let shown = self.show(resolved);
+        self.report(
+          CompileError::at(
+            ErrorCode::TypeMismatch,
+            span,
+            format!("`null` is not a value of `{shown}`"),
+          )
+          .with_help(format!("declare the type as `{shown}?` to allow `null`")),
+        );
+        self.context.optional_of(resolved)
+      }
+    }
+  }
+
+  fn check_interpolation(&mut self, ty: TypeId, span: Span) {
+    let resolved = self.context.shallow_resolve(ty);
+    let primitive = matches!(
+      self.context.kind(resolved),
+      TypeKind::Bool
+        | TypeKind::Int
+        | TypeKind::Uint
+        | TypeKind::Float
+        | TypeKind::Char
+        | TypeKind::String
+        | TypeKind::Error
+        | TypeKind::Never
+    );
+    if primitive {
+      return;
+    }
+    if let TypeKind::Generic(generic) = *self.context.kind(resolved) {
+      // tham so kieu co rang buoc thi stringable neu mot trong cac rang
+      // cai nay buoc cho `to_string`.
+      // khi lower, nen cho nay khong can itable.
+      if self.bound_supplies(generic, "to_string") {
+        return;
+      }
+    }
+    let stringable = self.prelude.stringable;
+    if self.record_conformance(stringable, resolved).is_some() {
+      return;
+    }
+    let shown = self.show(resolved);
+    self.report(
+      CompileError::at(
+        ErrorCode::InvalidInterpolation,
+        span,
+        format!("`{shown}` cannot be written into a string"),
+      )
+      .with_note("interpolation takes a primitive, or a type with `fn to_string(): string`"),
+    );
+  }
+
+  fn check_identifier(&mut self, node: NodeId, name: &Ident) -> TypeId {
+    let Some(binding) = self.values.get(&node).copied() else {
+      return TypeId::ERROR;
+    };
+    match binding {
+      ValueBinding::Local(local) | ValueBinding::Captured(local) => self.local_type(local),
+      ValueBinding::Field { owner, index } => self
+        .context
+        .def(owner)
+        .as_struct()
+        .and_then(|structure| structure.fields.get(index as usize))
+        .map(|field| field.ty)
+        .unwrap_or(TypeId::ERROR),
+      ValueBinding::Method(_) => {
+        self.report(
+          CompileError::at(
+            ErrorCode::UnknownIdentifier,
+            name.span,
+            format!("`{}` is a method and must be called", name.name),
+          )
+          .with_help(format!("write `{}()`", name.name)),
+        );
+        TypeId::ERROR
+      }
+      ValueBinding::Function(func) => self.function_value_type(func, name.span),
+      ValueBinding::GlobalConst(global) => self.global_types[global.index()],
+      ValueBinding::Module(_) => {
+        self.report(
+          CompileError::at(
+            ErrorCode::UnknownIdentifier,
+            name.span,
+            format!("`{}` is a module, not a value", name.name),
+          )
+          .with_help(format!("reach into it: `{}.item`", name.name)),
+        );
+        TypeId::ERROR
+      }
+      ValueBinding::Type(def) => {
+        let what = self.context.def(def).name.clone();
+        self.report(
+          CompileError::at(
+            ErrorCode::UnknownIdentifier,
+            name.span,
+            format!("`{what}` is a type, not a value"),
+          )
+          .with_help(
+            "name a variant with `Enum.Variant`, or build a value with `Type { ... }`",
+          ),
+        );
+        TypeId::ERROR
+      }
+      ValueBinding::Predeclared(value) => {
+        self.report(
+          CompileError::at(
+            ErrorCode::UnknownIdentifier,
+            name.span,
+            format!("`{}` is a builtin and must be called", value.spelling()),
+          )
+          .with_help(format!("write `{}(x)`", value.spelling())),
+        );
+        TypeId::ERROR
+      }
+      ValueBinding::Conversion(target) => {
+        let shown = self.show(target);
+        self.report(
+          CompileError::at(
+            ErrorCode::UnknownIdentifier,
+            name.span,
+            format!("`{shown}` is a type, not a value"),
+          )
+          .with_help(format!("a conversion is a call: `{shown}(x)`")),
+        );
+        TypeId::ERROR
+      }
+    }
+  }
+
+  fn function_value_type(&mut self, func: FuncId, span: Span) -> TypeId {
+    let definition = self.context.func(func).clone();
+    if definition.is_generic() {
+      self.report(
+        CompileError::at(
+          ErrorCode::CannotInferType,
+          span,
+          format!(
+            "`{}` is generic, so it has no single function type",
+            definition.name
+          ),
+        )
+        .with_help("call it instead, or wrap it in a closure"),
+      );
+      return TypeId::ERROR;
+    }
+    let variadic = definition
+      .variadic_index()
+      .map(|index| definition.params[index].ty);
+    let params = definition
+      .params
+      .iter()
+      .filter(|param| !param.variadic)
+      .map(|param| param.ty)
+      .collect();
+    self.context.function(FnType {
+      params,
+      variadic,
+      ret: definition.ret,
+      failable: definition.failable,
+    })
+  }
 }
