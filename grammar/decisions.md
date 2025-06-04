@@ -757,3 +757,362 @@ known - it needs type information during parsing, and mixing the two spellings
 just moves the confusion.
 
 ---
+
+## Part 6 - Types, generics, interfaces
+
+### D-21. Generic parameters take interface bounds
+
+**Decision.** `<T>` and `<T: Printable>` and `<T: Printable + Comparable>`.
+An **unbounded** type parameter supports only binding, passing, returning and
+storing - calling a method on it is an error telling you to add a bound.
+
+Generic declarations appear on `fn`, `struct`, `enum` and `interface`. There is
+no variance (all parameters are invariant), no specialisation, no default type
+parameters, no const generics, and no higher-kinded types. The intended
+implementation strategy is monomorphisation.
+
+**Why.** The spec shows generics with no constraint syntax. Without bounds,
+generics can only shuffle opaque values, which is enough for `first<T>` but not
+for anything that has to *do* something with a `T`. The alternative - allow any
+method call and check it at each instantiation, C++-template style - produces
+error messages at the instantiation site instead of the definition site, which
+is precisely the failure mode Pump's "fast compilation, clear errors" stance
+should avoid.
+
+Bounds cost one production (`TypeBound`) and give the checker a definition-site
+check.
+
+`implements Box<T>: Printable` is **not** supported in 1.0 - the `implements`
+subject must be a non-generic named type.
+
+### D-22. No top-level `let`; module state is `const`
+
+**Decision.** Module level admits `const` only. There are no mutable globals in
+1.0. Module consts are initialised in dependency order before `main`; an
+initialisation cycle is a compile error.
+
+**Why.** The spec's binding section only ever shows `const` at file scope
+(`const VERSION`, `const MAX_USERS`, `const config = load_config()`), and it
+explicitly allows a *runtime-initialised* const, which is the useful half of a
+global. Mutable globals would additionally force the GC to treat every module
+slot as a permanent root and would raise initialisation-order questions that a
+single-threaded 1.0 gains nothing from answering.
+
+### D-23. Name resolution inside a method
+
+**Decision.** An unqualified identifier resolves by walking these scopes and
+stopping at the first hit:
+
+1. Local bindings of the innermost block, then outward through enclosing
+   blocks of the current function or closure. A binding is visible only *after*
+   its declaration within its block.
+2. Parameters of the innermost function or closure.
+3. For each enclosing closure, innermost first: repeat 1 and 2 in that
+   closure's scope (lexical capture).
+4. If the innermost function is a **method**, or a closure lexically inside
+   one: the fields **and methods** of `this`.
+5. Module-level declarations of the current file - consts, functions, structs,
+   enums, interfaces - regardless of their order in the file.
+6. Module aliases bound by `import`.
+7. Predeclared identifiers.
+
+Plus:
+
+- **`this.name` skips 1-3 and resolves at 4.** That is how the spec's example
+  works: in `fn rename(name: string) { this.name = name }`, the right-hand
+  `name` hits the parameter at step 2 and `this.name` is unambiguously the
+  field.
+- **Reads and writes resolve identically.** If `age` resolves to a field at
+  step 4, then `age = 19` assigns the field, exactly as `print(age)` reads it.
+- **Methods resolve like fields.** Inside a method, `greet()` means
+  `this.greet()` when nothing nearer is named `greet`.
+- **`this` is immutable.** `this = x` is an error; `this.f = x` is not.
+- Type names live in a **separate namespace**, walked as: generic parameters,
+  module-level types, module aliases, predeclared types. A local named `x`
+  never shadows a type named `x`.
+
+**Why the read/write symmetry.** The tempting alternative - reads may omit
+`this.`, writes must include it - sounds safer but is a silent asymmetry that
+users will trip over in both directions. The shadowing rules already give a
+complete answer to "which `name` is this?", and applying them uniformly means
+there is exactly one rule to learn. A formatter or lint may still prefer
+explicit `this.` on writes; that is a style question, not a language one.
+
+**Shadowing.** Two declarations of the same name in the *same* block is an
+error. Shadowing an outer block, a parameter, a field, or a module-level name
+is allowed. Shadowing a non-shadowable predeclared name (`int`, `string`,
+`Error`, ...) is an error. A parameter shadowing a field is allowed and is the
+spec's own example.
+
+### D-24. `const` binds the value, not the interior
+
+**Decision.** `const` means the *binding* cannot be reassigned. For a reference
+type, the fields and elements reached through it remain assignable:
+
+```pump
+const user = User { name: "Minh", age: 18 }
+user = other      // error: cannot assign to a const binding
+user.age = 19     // legal
+```
+
+**Why.** This is what the spec describes - "`const` means the binding cannot be
+reassigned" - and it is the only reading under which
+`const config = load_config()` is useful. Deep immutability would need a
+transitive immutability system in the type checker, which is a whole language
+feature and not one the spec asks for.
+
+The same rule governs the `for` binding, which is a fresh immutable binding per
+iteration.
+
+### D-25. Null narrowing, and its deliberate limits
+
+**Decision.** Within a region guarded by a comparison of a **simple local
+identifier** against `null`, that identifier narrows from `T?` to `T`:
+
+- `if x != null { A } else { B }` narrows `x` in `A`.
+- `if x == null { A } else { B }` narrows `x` in `B`, and - when `A` always
+  diverges - in every statement after the `if`.
+- `&&` chains narrow left to right within the condition and into the
+  then-branch. `||` does not narrow.
+- A leading `!` inverts the narrowing.
+
+Narrowing is **defeated for the whole enclosing function** if the identifier is
+assigned anywhere inside the narrowed region, or is captured by a closure that
+assigns it.
+
+**Narrowing applies to simple identifiers only, not to field paths.** For
+`a.b`, bind a local first.
+
+**Why this exists at all.** The spec's own optional example requires it:
+
+```pump
+if user != null {
+    print(user.name)
+}
+```
+
+Without narrowing that is a type error, and the spec's optional section stops
+working. So the rule has to be written down; the only question is how far it
+goes.
+
+**Why the field-path limit.** Narrowing `a.b` is only sound if nothing can
+change `a.b` in between - which means proving that `a` is not aliased, that no
+call in the region mutates it, and that no closure captures it. Pump has GC and
+reference-semantics structs, so that proof is not available. Rather than ship a
+rule that is *usually* right, 1.0 restricts narrowing to locals, where it is
+always right, and asks for one extra line:
+
+```pump
+let parent = user.parent
+if parent != null {
+    print(parent.name)
+}
+```
+
+**Rejected.** An `if let x = opt { }` binding form - a second conditional
+construct for one case the `!= null` test already covers, and the spec does not
+have it.
+
+### D-26. Map and set iteration order is insertion order
+
+**Decision.** Iterating a map or a set yields entries in **insertion order**,
+guaranteed and reproducible across runs and across builds. Mutating a
+collection while iterating it is a runtime panic, detected by a modification
+counter.
+
+**Why.** The alternatives are unspecified order (which programs then
+accidentally depend on, breaking on a compiler upgrade) and deliberately
+randomised order (Go's answer to that problem, which trades a correctness
+hazard for undebuggable non-determinism). Insertion order is deterministic,
+makes test output stable, makes printed maps readable, and costs one extra
+pointer chain per entry. For a language whose stated goals are readability and
+predictability, that is the right trade.
+
+`float` may not be a map key or a set element - it has no total order and `NaN`
+is not equal to itself.
+
+---
+
+## Part 7 - Calls, matching, strings, closures
+
+### D-27. Named arguments must follow positional ones
+
+**Decision.**
+
+**At the declaration.** Parameters appear in this order, enforced by the
+parser: required, then defaulted, then at most one variadic, which must be
+last. A variadic may not have a default. Default values must be **constant
+expressions**, evaluated at compile time, and may not reference another
+parameter.
+
+**At the call site.** **All positional arguments must precede all named
+arguments.** Named arguments may not come first, and a positional argument
+after a named one is an error:
+
+```
+error: positional arguments must come before named arguments
+```
+
+Named arguments may appear in any order among themselves.
+
+**Binding algorithm.**
+
+1. Positional arguments fill parameters left to right.
+2. When the variadic parameter is reached, every remaining positional argument
+   is collected into it.
+3. Named arguments then fill parameters still unfilled.
+4. Naming an already-filled parameter -> `argument \`p\` supplied twice`.
+5. Naming the variadic parameter -> `a variadic parameter cannot be passed by
+   name`.
+6. Naming no parameter -> error.
+7. Any parameter still unfilled must have a default.
+
+**Named arguments require a statically known callee.** They are allowed on a
+direct call to a named function or method only - never through a value of
+function type, and never through an interface method, because function types
+and interface signatures carry no parameter names.
+
+There is no argument spread (`f(...xs)`) in 1.0.
+
+**Why positional-first.** Allowing `f(port: 8080, "localhost")` means the
+positional argument's index depends on which parameters the named ones already
+consumed. That is implementable but it makes the rule non-local - you cannot
+tell what `"localhost"` binds to without reading the whole argument list *and*
+the declaration - and it makes every arity error message worse. Positional-first
+is what Python, Swift, Kotlin, C# and Dart all settled on.
+
+**Why variadics interact this way.** Positional-first makes the variadic case
+fall out with no extra rule: positionals fill left to right until they reach
+the variadic, everything after goes into it, and named arguments then fill
+whatever is left, which by construction is only parameters *before* the
+variadic that were not reached positionally. `f(1, b: 5)` on
+`fn f(a: int, b: int = 1, values: ...int)` gives `a=1, b=5, values=[]`, and
+`f(1, 2, 3, b: 5)` is a clean "supplied twice" error.
+
+**Why constant defaults.** A default expression evaluated per call site is a
+hidden cost and raises "in whose scope?" questions. A constant is predictable,
+cacheable, and diagnosable at the declaration.
+
+**Consequence to document.** Parameter names are part of a function's public
+API. Renaming one is a breaking change.
+
+### D-28. `match` is a statement; arms take an expression or a block
+
+**Decision.** `match` is a **statement** in 1.0, not an expression.
+
+Arm syntax: `Pattern ("if" Guard)? "=>" (Block | Statement)`. Both spec forms
+parse:
+
+```pump
+match value {
+    0 => print("zero")
+    1 => print("one")
+    _ => print("other")
+}
+
+match color {
+    Color.Red   => { print("red") }
+    Color.Green => { print("green") }
+    Color.Blue  => { print("blue") }
+}
+```
+
+**Arm separator.** A block arm ends with `}`, which is in the closer set, so a
+terminator appears automatically. A statement arm ends with its own terminator.
+A `,` is **also** accepted in place of that terminator, because a comma between
+arms is what most people type. Formally: after an arm, the parser accepts `,`,
+or a terminator, or `}`.
+
+**Patterns.** Wildcard `_`, `null`, `true`/`false`, integer / char /
+interpolation-free string literals, integer and char ranges, bindings, qualified
+variants with positional payloads, struct patterns with `..`, tuple patterns,
+or-patterns with `|`, and guards.
+
+There are **no float literal patterns** - `match x { 1.5 => ... }` is an error
+telling you to use a comparison. Equality on floats is not a sound basis for
+dispatch.
+
+Every alternative of an or-pattern must bind the same names with the same
+types. A pattern may bind a given name at most once.
+
+**Exhaustiveness.** Required, always.
+
+- `_` or a bare binding makes any match exhaustive.
+- `bool`: `true` and `false` suffice.
+- Enums: every variant covered, with exhaustive payload sub-patterns.
+- `T?`: `null` plus a pattern covering `T`.
+- Tuples and structs: exhaustive when every component is.
+- `int`, `uint`, `float`, `char`, `string`: never exhaustive from literals
+  alone. **Range patterns do not make an integer match exhaustive** - the
+  analysis is a usefulness check, not an interval solver.
+- **A guarded arm never contributes to exhaustiveness**, because the guard
+  cannot be evaluated statically.
+- An arm that can never match, because earlier arms already cover it, is an
+  **error** ("unreachable match arm"), from the same algorithm. Guarded arms
+  are exempt.
+
+Arms are tried in source order.
+
+**Why statement-only.** A match expression needs value-producing blocks, and
+Pump does not have them - the spec is emphatic that there is no implicit
+return and that `a + b` on its own line means nothing. Adding a value-block
+just for `match` would be a second, inconsistent evaluation rule. A match
+expression is a clean 1.1 addition once (if) blocks gain values.
+
+**Why guards.** They cost one optional production and they prevent the arm
+explosion that otherwise pushes people back to `if`/`else` chains. The
+exhaustiveness rule keeps them sound.
+
+### D-29. String interpolation holds full expressions
+
+**Decision.** `{ ... }` inside a string holds a **complete expression**, not
+just an identifier. The scanner emits a bracketed token stream -
+`string_start`, `string_text`, `interp_start`, ordinary tokens, `interp_end`,
+`string_end` - so the parser reuses its normal `Expression` routine.
+
+- `\{` writes a literal `{`. `\}` is accepted and equals `}`.
+- An unescaped `}` in string text is just a `}`; only a `}` closing an open
+  interpolation ends one. So `"a } b"` needs no escaping.
+- Interpolations **nest**: `"{f("{x}")}"` is legal.
+- **No raw newline may appear in a string literal, including inside an
+  interpolation.** Terminator insertion therefore never fires inside a string.
+- An empty interpolation `"{}"` is an error.
+- The interpolated expression must be a primitive or conform to the builtin
+  `Stringable` interface (`fn to_string(): string`).
+- There is no format-specifier syntax in 1.0.
+- Adjacent string literals are not concatenated; use `+`.
+
+**Why full expressions.** `"{user.name}"` and `"{a + b}"` are what people
+immediately try, and restricting to bare identifiers only pushes the work into
+a temporary variable on the line above.
+
+**Why `\{` rather than `{{`.** Doubling is ambiguous with an interpolation
+whose expression begins with a map literal, and it makes the scanner's
+lookahead depend on what follows. A single escape character, the one Pump
+already has, is consistent with `\"` and `\\`.
+
+**Why no raw newlines.** It keeps terminator insertion (D-1) and string
+scanning completely independent, which removes a whole family of interactions
+between two already subtle rules.
+
+### D-30. Closures need explicit types; no `=>` shorthand
+
+**Decision.** An anonymous function is `fn(a: int, b: int): int { ... }`.
+Parameter types are **required**, and the return type is required when the
+closure returns a value. The `(a, b) => a + b` shorthand is **not** in 1.0.
+
+A closure captures **bindings**, not values: a captured `let` stays mutable
+through the closure, and every copy of the closure observes the same binding.
+Captured locals are boxed and kept alive by the GC. A closure inside a method
+may capture `this`. A closure cannot refer to the binding it is being assigned
+to - `let f = fn() { f() }` is an error; recursion needs a named top-level
+function.
+
+**Why.** The spec leans against `=>` explicitly ("normal functions are clear
+enough and the grammar is smaller") and its own examples type every closure
+parameter. Bidirectional closure-parameter inference is real work in the
+checker and it is a purely additive 1.1 feature; shipping without it costs a
+few characters and buys a simpler checker now.
+
+Note that `=>` remains a token, used only for match arms. Reserving it here
+keeps the shorthand available later.
