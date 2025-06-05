@@ -118,3 +118,57 @@ This is universal across languages and there is no reason to differ.
 | `t.0.1` | `(t.0).1` - after `.`, digits scan as a tuple index |
 
 ---
+
+## Interaction with `<` and `>`
+
+Three separate mechanisms keep angle brackets unambiguous. They are listed
+here because this is where a reader will look for them.
+
+1. **In an expression, `<` and `>` are always comparison.** Explicit type
+   arguments use turbofish: `zero::<int>()`, `Box::<int> { value: 1 }`.
+   Type arguments are inferred by default, so turbofish is rare.
+
+2. **In a declaration or a type, `<` and `>` are always brackets.**
+   `fn first<T>(items: [T]): T?`, `struct Box<T>`, `let b: Box<int>`,
+   `set<int>`. The parser knows which routine it is in; there is no guessing.
+
+3. **`>` splitting.** Maximal munch produces `>>`, `>=` and `>>=`. Inside a
+   type-argument list, when the parser needs a closing `>` and sees one of
+   these, it splits the token and pushes the remainder back:
+
+   | Token seen | Consumed | Pushed back |
+   |---|---|---|
+   | `>>` | `>` | `>` |
+   | `>=` | `>` | `=` |
+   | `>>=` | `>` | `>=` |
+
+   So `Box<Box<int>>`, `set<set<int>>` and `let b: Box<Box<int>>= v` all
+   parse. Splitting happens only in type-argument position, never in an
+   expression.
+
+---
+
+## Operators that do not exist in Pump 1.0
+
+Each of these is a **lexical error with a specific message**, never a generic
+"unexpected character". Reserving them now keeps a 1.1 addition source
+compatible, and a precise message is worth far more than the two lines of
+scanner code it costs.
+
+| Sequence | Message |
+|---|---|
+| `~` | `Pump 1.0 has no bitwise NOT; use x ^ -1` |
+| `&=` `\|=` `^=` `<<=` `>>=` | `Pump 1.0 has only = += -= *= /= %=` |
+| `->` | `Pump writes return types with ':', not '->'` |
+| `**` | `Pump has no exponent operator; use math.pow` |
+| `++` `--` | `Pump has no increment operator; use += 1` |
+| `?.` | not a token - `x?.y` is already `(x?).y`, which is what you want |
+| `??` | not a token - the null fallback is `catch`, or an `if` |
+| `?:` | no ternary in Pump 1.0 |
+| `@` `#` `$` | no attribute, directive or interpolation sigil in Pump 1.0 |
+| `<-` | scans as `<` then `-`; there are no channels in 1.0 |
+
+There is also **no cast operator**. `as` is used only for import aliases.
+Numeric and string conversions are calls on the type name: `int(x)`,
+`uint(x)`, `float(x)`, `char(x)`, `string(x)`. There are no implicit
+conversions of any kind, `int` to `float` included.
