@@ -1116,3 +1116,130 @@ few characters and buys a simpler checker now.
 
 Note that `=>` remains a token, used only for match arms. Reserving it here
 keeps the shorthand available later.
+
+### D-31. Interfaces: structural, signatures only
+
+**Decision.** An interface body holds method **signatures** only - no bodies,
+no fields, no embedded interfaces, no default parameter values. Conformance is
+**structural**: a type conforms when it declares a method of the same name
+whose signature matches in arity, parameter types in order, and return type.
+Parameter *names* and defaults are not part of the match, which is why a method
+reached through an interface cannot be called with named arguments (D-27).
+
+An interface name is usable as a type; such a value is a fat pointer and
+dispatches dynamically.
+
+`implements User: Printable` is a compile-time **assertion**. It does not
+create conformance - it demands it, and produces an error listing the missing
+or mismatched methods when it does not hold.
+
+**Why.** This is exactly what the spec describes ("the compiler can check
+structural conformance"), including the optional explicit form. Default method
+bodies and interface inheritance are the two features that turn an interface
+system into an inheritance system; leaving them out keeps 1.0's method
+resolution to a single lookup.
+
+---
+
+## Part 8 - Edge cases found while writing the grammar
+
+Every one of these is decided in `pump.ebnf`; they are collected here because
+each is a place a parser author would otherwise have had to guess.
+
+| # | Edge case | Resolution | Grammar |
+|---|---|---|---|
+| E-1 | `0..10` - does `0.` scan as a float? | While scanning a number, a `.` is a decimal point **only** if the next character is a digit. So `0..10`, `0..=10` and `1.max()` all scan correctly, and a float literal needs digits on both sides. | 3.2.2 |
+| E-2 | `t.0.1` - tuple access chains scanning as a float | Immediately after a `.` token, digits scan as a **tuple index**, never as a float. | 9.6 |
+| E-3 | `Box<Box<int>>` - `>>` is one token | In type-argument position the parser **splits** `>>`->`>` `>`, `>=`->`>` `=`, `>>=`->`>` `>=`. Only there, never in an expression. | 9.2 |
+| E-4 | `x!=y` - is that `x!` then `= y`? | Maximal munch: it is `x != y`. `x!` is not an l-value anyway, so nothing is lost. | 4.1 |
+| E-5 | `a !b` versus `a! b` | Position, not spacing. Both are `(a!)` followed by `b`, both the same parse error. | 9.3 |
+| E-6 | `let a = b` / newline / `(c).d()` | Two statements. `(` and `[` are excluded from the elision set, killing JavaScript's ASI hazard. | 8.3 |
+| E-7 | `return` on one line, its value on the next | `return` is in the closer set, so this is a bare return plus a separate statement. Documented loudly; it is Go's rule. | 8.4 |
+| E-8 | `} else {` with `else` on the next line | `else` and `catch` are in the elision set, so both layouts work. | 8.3 |
+| E-9 | `f() catch {}` - empty handler or empty-map default? | After `catch`, `{` always begins a handler block. A map fallback is `catch ({})`. | 14.2 |
+| E-10 | `catch Foo { x: 1 }` - binder or struct-literal default? | Mode `ns` after `catch`: it is the binder form. A struct-literal default must be parenthesised. | 14.1, 14.2 |
+| E-11 | `catch e` at end of line, `{` on the next | A terminator is inserted after the identifier and `{` is not in the elision set, so this is never read as the binder form. | 14.1 |
+| E-12 | A statement beginning with `{` | Always a Block, never a map literal. Statement position is not expression position. | 13.0.1 |
+| E-13 | `f() { ... }` and `a[0] { ... }` | Not struct literals. A struct literal's `{` is legal only after a **path** - an identifier, or `module.Type`, each optionally with one turbofish. | 14.13 |
+| E-14 | `{ name: "x" }` when a struct was meant | A map keyed by the *value* of `name`. The accepted cost of P-2. | 14.24 |
+| E-15 | Multi-line array literal | Needs commas: insertion is suppressed inside `[`. Struct/map/set literals accept either separator. | 8.1, 14.19 |
+| E-16 | `-9223372036854775808` | An integer literal directly under unary `-` may reach 2^63. Anywhere else the cap is 2^63−1. | 3.5.3 |
+| E-17 | `int.min / -1` | Wraps to `int.min`, consistent with D-6, rather than panicking. Only `/0` and `%0` panic. | D-7 |
+| E-18 | Shift count >= width | Yields 0 (or −1 for a negative `int >>`). **Not** masked. A negative count panics. | D-7 |
+| E-19 | `a & b == c` | `(a & b) == c`. Bitwise binds tighter than comparison. | precedence.md |
+| E-20 | `a < b < c` | Parse error - comparison is non-associative. Doubles as the second lock on P-1. | 14.10 |
+| E-21 | `0..n - 1` | `0..(n - 1)`. Range sits below every arithmetic and logical operator. | precedence.md |
+| E-22 | `a?::<int>()` | Scans fine; rejected by the checker, not the parser. `?` and turbofish never collide. | 9.4 |
+| E-23 | `T??` and `T!!` | Parse, then rejected: optionals do not nest, error types do not nest. `T?!` and `T!?` are both legal and differ. | 11.5 |
+| E-24 | A failable function that returns nothing | `fn f(): void!`. A bare `!` return type is a syntax error with a hint. | 11.7 |
+| E-25 | An interpolation containing a string containing an interpolation | Legal; the scanner tracks nesting. Depth limit, if any, must be >= 32. | 3.4.4 |
+| E-26 | A raw `}` in a string | Literal. Only a `}` closing an open interpolation ends one. | 3.4.2 |
+| E-27 | A newline inside a string | Illegal - so terminator insertion and string scanning never interact. | 3.4.3 |
+| E-28 | `\xHH` above 0x7F | Error. `string` is always valid UTF-8 and there must be no way to write an invalid one. | 3.4.5 |
+| E-29 | `_` as a name | `_` is its own token, not an identifier. `_x` and `__` are ordinary identifiers. `let _ = f()` discards. | 2.2.2 |
+| E-30 | `\` outside an import path | A lexical error with a specific message, not a generic one. | 10.2.2 |
+| E-31 | `(a,)` | Error: Pump has no 1-tuples. `()` is not an expression or a type either. | 14.20, 11.3 |
+| E-32 | `while set{1,2}.has(x) {` | Legal. `set` is a keyword and cannot open a block, so it is exempt from mode `ns`. | 9.1 |
+| E-33 | `match x { User { .. } => ... }` | No parentheses needed: a pattern position is not an expression position, so mode `ns` does not apply. | 15.9 |
+| E-34 | `break`/`continue` inside a closure inside a loop | Error. A closure body is a function boundary. | 13.5.4 |
+| E-35 | Assigning to a field of a `const` binding | Legal. `const` binds the value, not the interior. | D-24 |
+| E-36 | Mutating a collection while iterating it | Runtime panic, via a modification counter. | 13.3.8 |
+| E-37 | Two `let`s of the same name in one block | Error. Shadowing in a *nested* block is fine. | 16.6 |
+| E-38 | `let int = 3` | Error: `int`, `uint`, `float`, `bool`, `char`, `string`, `void`, `Error` are predeclared and non-shadowable. `print`, `println`, `panic`, `assert`, `len` and the seven operating-system builtins (`read_file_text`, `read_file_bytes`, `write_file_text`, `write_file_bytes`, `os_args`, `os_run`, `os_error`) are shadowable. | 2.5.1 |
+| E-39 | Unused import | An error (unused locals are only a warning). | 16.9 |
+| E-40 | An import after a declaration | Error: imports must be at the top of the file. Top-level declarations themselves are order-independent. | 10.1.1 |
+| E-41 | Nested `fn` inside a block | Not permitted in 1.0; use `let f = fn(...) { ... }`. Which means a `fn` inside a block is always a closure. | 12.1.5 |
+| E-42 | An enum variant named like a method | Error; variants and methods share one namespace, as do fields and methods in a struct. | 12.3.6, 12.2.4 |
+| E-43 | A non-ASCII identifier, or U+00A0 as whitespace | Lexical errors. No invisible character may change a program's meaning. | 2.2.1, 1.4 |
+| E-44 | A block comment containing `/*` | Nests. Commenting out a region containing comments is safe. | 2.1.1 |
+
+---
+
+## Part 9 - Open questions for the owner
+
+None of these block the parser: each has a decision recorded above that is
+complete and implementable. They are listed because they are the places where a
+different call is defensible, and where changing course later is cheap **now**
+and expensive after code is written against 1.0.
+
+1. **The import separator (D-16).** The backslash is kept as specified and
+   works, but it reads badly off Windows, collides with the escape character,
+   and cannot be pasted into a string. Recommended alternative: `.`
+   (`import net.http`), which matches how module members are already accessed.
+   Second choice: `/`. One production changes.
+
+2. **What postfix `?` means (D-13).** Chosen: propagate null, symmetric with
+   `x!`. The spec's one example is consistent with force-unwrap as well. If the
+   owner wants force-unwrap-or-panic, that is a one-line change to the checker
+   and a rename of the stdlib helpers - but it should be decided before code
+   exists, because the two readings differ at every use site.
+
+3. **`fail` (D-15).** An addition, not in the draft. Something like it is
+   *required* - the spec provides no way to produce an error at all - but the
+   keyword and spelling are the owner's to confirm.
+
+4. **The two operator gaps (D-9).** No unary `~`, and no `&= |= ^= <<= >>=`.
+   Both are purely additive and both currently produce a specific,
+   helpful error. Recommended for 1.1.
+
+5. **`match` as an expression (D-28).** Statement-only in 1.0 because Pump has
+   no value-producing blocks. Worth revisiting together, since a match
+   expression and a block-with-a-value are really one feature.
+
+6. **Static / associated functions on structs (D-18 area).** There are none in
+   1.0, so a constructor is a free function (`fn create_user(...) -> User`),
+   which is what the spec's own example does. `User.new(...)` would need
+   associated-function syntax and a decision about `this`-less methods.
+
+7. **`s[i]` on strings (D-8).** Deliberately absent, to avoid the byte-versus-
+   character trap. If the owner wants indexing, the byte-or-scalar question has
+   to be answered first, and either answer is a footgun.
+
+8. **Value versus reference semantics.** The grammar assumes primitives and
+   tuples are value types and that structs, enums with payloads, arrays, maps,
+   sets, strings, closures and interface values are reference types, GC-managed.
+   Nothing in the *syntax* depends on this, but `==` does: in 1.0, `==` is
+   defined on primitives, `string`, `char`, `bool`, tuples of comparable types,
+   and payload-free enums; on other reference types it is identity. User-defined
+   equality is deferred. This is the checker's territory rather than the
+   grammar's, and it is flagged here so it does not fall between the two.
