@@ -1441,10 +1441,10 @@ fn expr_assigns(
 }
 
 fn contains_break(block: &Block) -> bool {
-  block.statements.iter().any(breaks)
+  block.statements.iter().any(statement_breaks)
 }
 
-fn breaks(statement: &Stmt) -> bool {
+fn statement_breaks(statement: &Stmt) -> bool {
   match &statement.kind {
     StmtKind::Break => true,
     StmtKind::Block(block) => contains_break(block),
@@ -1458,14 +1458,14 @@ fn breaks(statement: &Stmt) -> bool {
               kind: StmtKind::If(nested.as_ref().clone()),
               span: nested.span,
             };
-            breaks(&wrapped)
+            statement_breaks(&wrapped)
           }
           None => false,
         }
     }
     StmtKind::Match(statement) => statement.arms.iter().any(|arm| match &arm.body {
       MatchArmBody::Block(block) => contains_break(block),
-      MatchArmBody::Stmt(inner) => breaks(inner),
+      MatchArmBody::Stmt(inner) => statement_breaks(inner),
     }),
     _ => false,
   }
@@ -1848,5 +1848,935 @@ impl Checker<'_> {
       ret: definition.ret,
       failable: definition.failable,
     })
+  }
+}
+
+impl Checker<'_> {
+  fn check_array(&mut self, elements: &[Expr], expected: Option<TypeId>, span: Span) -> TypeId {
+    let hint = match self
+      .literal_expectation(expected)
+      .map(|ty| self.context.kind(ty).clone())
+    {
+      Some(TypeKind::Array(element)) => Some(element),
+      _ => None,
+    };
+    let mut element_type = hint;
+    for element in elements {
+      let ty = self.check_value(element, element_type);
+      match element_type {
+        Some(expected) => {
+          self.expect_assignable(expected, ty, element.span, "this array element")
+        }
+        None => element_type = Some(ty),
+      }
+    }
+    match element_type {
+      Some(element) => self.context.array_of(element),
+      None => {
+        self.report_uninferable("array", span, "let items: [int] = []");
+        TypeId::ERROR
+      }
+    }
+  }
+
+  fn check_set(&mut self, elements: &[Expr], expected: Option<TypeId>, span: Span) -> TypeId {
+    let hint = match self
+      .literal_expectation(expected)
+      .map(|ty| self.context.kind(ty).clone())
+    {
+      Some(TypeKind::Set(element)) => Some(element),
+      _ => None,
+    };
+    let mut element_type = hint;
+    for element in elements {
+      let ty = self.check_value(element, element_type);
+      match element_type {
+        Some(expected) => {
+          self.expect_assignable(expected, ty, element.span, "this set element")
+        }
+        None => element_type = Some(ty),
+      }
+    }
+    match element_type {
+      Some(element) => {
+        self.demand_hashable(element, span, "a set element");
+        self.context.set_of(element)
+      }
+      None => {
+        self.report_uninferable("set", span, "let ids: set<int> = set{}");
+        TypeId::ERROR
+      }
+    }
+  }
+
+  fn check_map(
+    &mut self,
+    entries: &[crate::ast::MapEntry],
+    expected: Option<TypeId>,
+    span: Span,
+  ) -> TypeId {
+    // `{}` viet giong nhau cho ca hai loai, nen mot cai rong ma chu thich
+    // `set<T>` thi la set rong chu khong phai map (spec 5)
+    let expectation = self
+      .literal_expectation(expected)
+      .map(|ty| self.context.kind(ty).clone());
+    if entries.is_empty() {
+      if let Some(TypeKind::Set(element)) = expectation {
+        self.demand_hashable(element, span, "a set element");
+        return self.context.set_of(element);
+      }
+    }
+
+    let hint = match expectation {
+      Some(TypeKind::Map { key, value }) => Some((key, value)),
+      _ => None,
+    };
+    let mut pair = hint;
+    for entry in entries {
+      let key = self.check_value(&entry.key, pair.map(|(key, _)| key));
+      let value = self.check_value(&entry.value, pair.map(|(_, value)| value));
+      match pair {
+        Some((expected_key, expected_value)) => {
+          self.expect_assignable(expected_key, key, entry.key.span, "this map key");
+          self.expect_assignable(
+            expected_value,
+            value,
+            entry.value.span,
+            "this map value",
+          );
+        }
+        None => pair = Some((key, value)),
+      }
+    }
+    match pair {
+      Some((key, value)) => {
+        self.demand_hashable(key, span, "a map key");
+        self.context.map_of(key, value)
+      }
+      None => {
+        self.report_uninferable("map", span, "let users: [string: User] = {}");
+        TypeId::ERROR
+      }
+    }
+  }
+
+  fn check_tuple(&mut self, elements: &[Expr], expected: Option<TypeId>) -> TypeId {
+    let hint = match self
+      .literal_expectation(expected)
+      .map(|ty| self.context.kind(ty).clone())
+    {
+      Some(TypeKind::Tuple(parts)) if parts.len() == elements.len() => Some(parts),
+      _ => None,
+    };
+    let mut parts = Vec::with_capacity(elements.len());
+    for (index, element) in elements.iter().enumerate() {
+      let expected = hint.as_ref().map(|parts| parts[index]);
+      let ty = self.check_value(element, expected);
+      if let Some(expected) = expected {
+        self.expect_assignable(expected, ty, element.span, "this tuple element");
+        parts.push(expected);
+      } else {
+        parts.push(ty);
+      }
+    }
+    self.context.tuple_of(parts)
+  }
+
+  fn demand_hashable(&mut self, ty: TypeId, span: Span, position: &str) {
+    let resolved = self.context.shallow_resolve(ty);
+    if self.context.is_hashable(resolved) || resolved == TypeId::ERROR {
+      return;
+    }
+    let shown = self.show(resolved);
+    let code = if resolved == TypeId::FLOAT {
+      ErrorCode::FloatNotHashable
+    } else {
+      ErrorCode::TypeMismatch
+    };
+    let mut error = CompileError::at(code, span, format!("`{shown}` cannot be {position}"));
+    if resolved == TypeId::FLOAT {
+      error = error.with_note("`float` has no total order and `NaN` is not equal to itself");
+    }
+    self.report(error);
+  }
+
+  fn report_uninferable(&mut self, what: &str, span: Span, example: &str) {
+    self.report(
+      CompileError::at(
+        ErrorCode::CannotInferType,
+        span,
+        format!("an empty {what} literal has nothing to infer its type from"),
+      )
+      .with_help(format!("annotate the binding: `{example}`")),
+    );
+  }
+
+  fn check_closure(&mut self, closure: &ClosureExpr, expected: Option<TypeId>) -> TypeId {
+    let hint = match self
+      .literal_expectation(expected)
+      .map(|ty| self.context.kind(ty).clone())
+    {
+      Some(TypeKind::Function(signature)) => Some(signature),
+      _ => None,
+    };
+
+    let mut params = Vec::with_capacity(closure.params.len());
+    let mut variadic = None;
+    for param in &closure.params {
+      let ty = self
+        .written_types
+        .get(&param.ty.id)
+        .copied()
+        .unwrap_or(TypeId::ERROR);
+      if matches!(param.kind, crate::ast::ParamKind::Variadic) {
+        variadic = Some(ty);
+        let array = self.context.array_of(ty);
+        self.bind_local(&param.name, array);
+      } else {
+        params.push(ty);
+        self.bind_local(&param.name, ty);
+      }
+    }
+
+    let (ret, failable) = match &closure.return_type {
+      Some(written) => {
+        let ty = self
+          .written_types
+          .get(&written.id)
+          .copied()
+          .unwrap_or(TypeId::ERROR);
+        match *self.context.kind(ty) {
+          TypeKind::Failable(inner) => (inner, true),
+          _ => (ty, false),
+        }
+      }
+      None => (TypeId::VOID, false),
+    };
+
+    let this = self.signature.this;
+    let owner = self.signature.owner;
+    let signature = std::mem::replace(
+      &mut self.signature,
+      Signature {
+        ret,
+        failable,
+        this,
+        owner,
+      },
+    );
+    // closure co the chay sau khi vung thu hep da het, nen khong co thu
+    // hep nao song sot vao trong than no (D-25)
+    let narrowings = std::mem::take(&mut self.narrowings);
+    self.closure_depth += 1;
+
+    let diverges = self.check_block(&closure.body);
+    if ret != TypeId::VOID && !diverges {
+      let shown = self.show(ret);
+      self.report(CompileError::at(
+        ErrorCode::MissingReturn,
+        closure.body.span,
+        format!("this closure must return `{shown}` on every path"),
+      ));
+    }
+
+    self.closure_depth -= 1;
+    self.narrowings = narrowings;
+    self.signature = signature;
+
+    let built = self.context.function(FnType {
+      params,
+      variadic,
+      ret,
+      failable,
+    });
+    if let Some(hint) = hint {
+      let wanted = self.context.function(hint);
+      self.unify(wanted, built);
+    }
+    built
+  }
+
+  fn check_unary(
+    &mut self,
+    op: UnaryOp,
+    operand: &Expr,
+    expected: Option<TypeId>,
+    span: Span,
+  ) -> TypeId {
+    match op {
+      UnaryOp::Not => {
+        let ty = self.check_value(operand, Some(TypeId::BOOL));
+        if !self.is_boolish(ty) {
+          let shown = self.show(ty);
+          self.report(
+            CompileError::at(
+              ErrorCode::LogicalOnNonBool,
+              span,
+              format!("`!` needs a `bool`, but this is `{shown}`"),
+            )
+            .with_help(self.suggest_boolean_test(ty)),
+          );
+        }
+        TypeId::BOOL
+      }
+      UnaryOp::Neg => {
+        // `-9223372036854775808` la mot literal, khong phai dau tru
+        // dat truoc mot so vuot khoang (3.5.3)
+        if let ExprKind::Int(magnitude) = operand.kind {
+          let ty = self.check_int_literal(magnitude, true, expected, operand.span);
+          self.record(operand.id, ty);
+          return ty;
+        }
+        let ty = self.check_value(operand, expected);
+        let resolved = self.context.shallow_resolve(ty);
+        match self.context.kind(resolved) {
+          TypeKind::Int | TypeKind::Float | TypeKind::Error | TypeKind::Never => resolved,
+          TypeKind::Uint => {
+            self.report(
+              CompileError::at(
+                ErrorCode::NegateUnsigned,
+                span,
+                "`uint` is unsigned, so it cannot be negated",
+              )
+              .with_help("convert first: `-int(x)`"),
+            );
+            resolved
+          }
+          TypeKind::Char => {
+            self.report(
+              CompileError::at(
+                ErrorCode::CharArithmetic,
+                span,
+                "`char` has no arithmetic",
+              )
+              .with_help("convert to a number first: `uint(c)`"),
+            );
+            TypeId::ERROR
+          }
+          _ => {
+            let shown = self.show(resolved);
+            self.report(CompileError::at(
+              ErrorCode::ArithmeticOnNonNumeric,
+              span,
+              format!("`-` needs `int` or `float`, but this is `{shown}`"),
+            ));
+            TypeId::ERROR
+          }
+        }
+      }
+    }
+  }
+
+  fn is_boolish(&self, ty: TypeId) -> bool {
+    matches!(
+      self.context.kind(self.context.shallow_resolve(ty)),
+      TypeKind::Bool | TypeKind::Error | TypeKind::Never
+    )
+  }
+
+  fn suggest_boolean_test(&self, ty: TypeId) -> String {
+    match self.context.kind(self.context.shallow_resolve(ty)) {
+      TypeKind::Int | TypeKind::Uint | TypeKind::Float => "compare it: `x != 0`".to_string(),
+      TypeKind::String => "compare it: `x != \"\"`".to_string(),
+      TypeKind::Optional(_) => "test it: `x != null`".to_string(),
+      _ => "Pump has no truthiness; write an explicit comparison".to_string(),
+    }
+  }
+
+  fn check_binary(
+    &mut self,
+    op: BinaryOp,
+    lhs: &Expr,
+    rhs: &Expr,
+    expected: Option<TypeId>,
+    span: Span,
+  ) -> TypeId {
+    use BinaryOp::*;
+    if op.is_logical() {
+      let left = self.check_value(lhs, Some(TypeId::BOOL));
+      let right = self.check_value(rhs, Some(TypeId::BOOL));
+      for (ty, operand) in [(left, lhs), (right, rhs)] {
+        if !self.is_boolish(ty) {
+          let shown = self.show(ty);
+          self.report(
+            CompileError::at(
+              ErrorCode::LogicalOnNonBool,
+              operand.span,
+              format!(
+                "`{}` needs `bool` operands, but this is `{shown}`",
+                op.spelling()
+              ),
+            )
+            .with_help(self.suggest_boolean_test(ty)),
+          );
+        }
+      }
+      return TypeId::BOOL;
+    }
+
+    // cai nay thu tu toan
+    // kieu tu ben ...
+    let numeric_hint = expected.filter(|_| op.is_arithmetic() || op.is_bitwise());
+    let (left, right) = if is_untyped_literal(lhs) && !is_untyped_literal(rhs) {
+      let right = self.check_value(rhs, numeric_hint);
+      let left = self.check_value(lhs, Some(right));
+      (left, right)
+    } else {
+      let left = self.check_value(lhs, numeric_hint);
+      let right = self.check_value(rhs, Some(left));
+      (left, right)
+    };
+
+    match op {
+      Eq | Ne => self.check_equality(op, left, right, lhs, rhs, span),
+      Lt | Gt | Le | Ge => self.check_ordering(op, left, right, span),
+      Shl | Shr => self.check_shift(op, left, right, lhs, rhs, span),
+      BitAnd | BitXor | BitOr => self.check_bitwise(op, left, right, span),
+      Add | Sub | Mul | Div | Rem => self.check_arithmetic(op, left, right, span),
+      And | Or => TypeId::BOOL,
+    }
+  }
+
+  fn check_equality(
+    &mut self,
+    op: BinaryOp,
+    left: TypeId,
+    right: TypeId,
+    lhs: &Expr,
+    rhs: &Expr,
+    span: Span,
+  ) -> TypeId {
+    // `x == null` ...
+    let comparing_null =
+      matches!(lhs.kind, ExprKind::Null) || matches!(rhs.kind, ExprKind::Null);
+    if comparing_null {
+      let other = if matches!(lhs.kind, ExprKind::Null) {
+        right
+      } else {
+        left
+      };
+      let resolved = self.context.shallow_resolve(other);
+      if !matches!(
+        self.context.kind(resolved),
+        TypeKind::Optional(_) | TypeKind::Error | TypeKind::Never
+      ) {
+        let shown = self.show(resolved);
+        self.report(
+          CompileError::at(
+            ErrorCode::ComparisonNotSupported,
+            span,
+            format!("`{shown}` is never `null`"),
+          )
+          .with_help(format!("declare it as `{shown}?` if it can be absent")),
+        );
+      }
+      return TypeId::BOOL;
+    }
+
+    if !self.assignable(left, right) && !self.assignable(right, left) {
+      let a = self.show(left);
+      let b = self.show(right);
+      self.report(
+        CompileError::at(
+          ErrorCode::ComparisonNotSupported,
+          span,
+          format!("cannot compare `{a}` with `{b}`"),
+        )
+        .with_note("`==` compares two values of the same type"),
+      );
+      return TypeId::BOOL;
+    }
+    let _ = op;
+    TypeId::BOOL
+  }
+
+  fn check_ordering(&mut self, op: BinaryOp, left: TypeId, right: TypeId, span: Span) -> TypeId {
+    if !self.assignable(left, right) && !self.assignable(right, left) {
+      let a = self.show(left);
+      let b = self.show(right);
+      self.report(CompileError::at(
+        ErrorCode::ComparisonNotSupported,
+        span,
+        format!("cannot order `{a}` against `{b}`"),
+      ));
+      return TypeId::BOOL;
+    }
+    let resolved = self.context.shallow_resolve(left);
+    let orderable = matches!(
+      self.context.kind(resolved),
+      TypeKind::Int
+        | TypeKind::Uint
+        | TypeKind::Float
+        | TypeKind::Char
+        | TypeKind::String
+        | TypeKind::Error
+        | TypeKind::Never
+    );
+    if !orderable {
+      let shown = self.show(resolved);
+      self.report(
+        CompileError::at(
+          ErrorCode::ComparisonNotSupported,
+          span,
+          format!("`{}` is not defined on `{shown}`", op.spelling()),
+        )
+        .with_note("ordering is defined on the numbers, `char` and `string`"),
+      );
+    }
+    TypeId::BOOL
+  }
+
+  fn check_shift(
+    &mut self,
+    op: BinaryOp,
+    left: TypeId,
+    right: TypeId,
+    lhs: &Expr,
+    rhs: &Expr,
+    span: Span,
+  ) -> TypeId {
+    let _ = span;
+    for (ty, operand) in [(left, lhs), (right, rhs)] {
+      if !self.context.is_integer(ty) && ty != TypeId::ERROR {
+        let shown = self.show(ty);
+        self.report(CompileError::at(
+          ErrorCode::BitwiseOnNonInteger,
+          operand.span,
+          format!(
+            "`{}` needs `int` or `uint`, but this is `{shown}`",
+            op.spelling()
+          ),
+        ));
+        return TypeId::ERROR;
+      }
+    }
+    left
+  }
+
+  fn check_bitwise(&mut self, op: BinaryOp, left: TypeId, right: TypeId, span: Span) -> TypeId {
+    if !self.context.is_integer(left) || !self.context.is_integer(right) {
+      let a = self.show(left);
+      let b = self.show(right);
+      if left != TypeId::ERROR && right != TypeId::ERROR {
+        self.report(CompileError::at(
+          ErrorCode::BitwiseOnNonInteger,
+          span,
+          format!(
+            "`{}` needs `int` or `uint`, but these are `{a}` and `{b}`",
+            op.spelling()
+          ),
+        ));
+      }
+      return TypeId::ERROR;
+    }
+    if !self.unify(left, right) {
+      let a = self.show(left);
+      let b = self.show(right);
+      self.report(
+        CompileError::at(
+          ErrorCode::NoImplicitConversion,
+          span,
+          format!("`{}` needs both operands to be the same type, but these are `{a}` and `{b}`", op.spelling()),
+        )
+        .with_help("convert one of them explicitly"),
+      );
+      return TypeId::ERROR;
+    }
+    left
+  }
+
+  fn check_arithmetic(
+    &mut self,
+    op: BinaryOp,
+    left: TypeId,
+    right: TypeId,
+    span: Span,
+  ) -> TypeId {
+    let resolved = self.context.shallow_resolve(left);
+    if matches!(self.context.kind(resolved), TypeKind::String) {
+      if op != BinaryOp::Add {
+        self.report(
+          CompileError::at(
+            ErrorCode::ArithmeticOnNonNumeric,
+            span,
+            format!("`{}` is not defined on `string`", op.spelling()),
+          )
+          .with_note("only `+` concatenates"),
+        );
+        return TypeId::STRING;
+      }
+      self.expect_assignable(TypeId::STRING, right, span, "the right-hand side of `+`");
+      return TypeId::STRING;
+    }
+    if matches!(self.context.kind(resolved), TypeKind::Char) {
+      self.report(
+        CompileError::at(ErrorCode::CharArithmetic, span, "`char` has no arithmetic")
+          .with_help("convert to a number first: `uint(c)`"),
+      );
+      return TypeId::ERROR;
+    }
+    if !self.context.is_numeric(resolved) {
+      if resolved != TypeId::ERROR && !matches!(self.context.kind(resolved), TypeKind::Never)
+      {
+        let shown = self.show(resolved);
+        self.report(CompileError::at(
+          ErrorCode::ArithmeticOnNonNumeric,
+          span,
+          format!(
+            "`{}` needs a numeric type, but this is `{shown}`",
+            op.spelling()
+          ),
+        ));
+      }
+      return TypeId::ERROR;
+    }
+    if !self.unify(left, right) {
+      let a = self.show(left);
+      let b = self.show(right);
+      self.report(
+        CompileError::at(
+          ErrorCode::NoImplicitConversion,
+          span,
+          format!("cannot apply `{}` to `{a}` and `{b}`", op.spelling()),
+        )
+        .with_note("Pump has no implicit numeric conversions, `int` to `float` included")
+        .with_help("convert one side: `float(n)`"),
+      );
+      return TypeId::ERROR;
+    }
+    resolved
+  }
+}
+
+fn is_untyped_literal(expr: &Expr) -> bool {
+  match &expr.kind {
+    ExprKind::Int(_) | ExprKind::Float(_) => true,
+    ExprKind::Group(inner) => is_untyped_literal(inner),
+    ExprKind::Unary {
+      op: UnaryOp::Neg,
+      operand,
+    } => is_untyped_literal(operand),
+    _ => false,
+  }
+}
+
+impl Checker<'_> {
+  fn check_assignment(&mut self, assign: &AssignStmt) {
+    let target = self.check_assign_target(&assign.target);
+    let value = self.check_value(&assign.value, target);
+
+    if let Some(target) = target {
+      match assign.op.binary_op() {
+        None => self.expect_assignable(target, value, assign.value.span, "this assignment"),
+        Some(op) => {
+          let produced = self.check_arithmetic(op, target, value, assign.span);
+          self.expect_assignable(
+            target,
+            produced,
+            assign.span,
+            "this compound assignment",
+          );
+        }
+      }
+    }
+
+    // ghi vao mot local da thu hep thi ket thuc thu hep ngay tai day. D-25
+    // con pha no tren ca vung nao chua phep ghi do nua, cai do `surviving`
+    // lo khi buoc vao vung.
+    if let Some(local) = self.assigned_local(&assign.target) {
+      self.narrowings.remove(&local);
+    }
+  }
+
+  fn check_assign_target(&mut self, target: &Expr) -> Option<TypeId> {
+    match &target.kind {
+      ExprKind::Ident(name) => self.check_assign_identifier(target, name),
+      ExprKind::This => {
+        self.report(
+          CompileError::at(
+            ErrorCode::CannotAssignToThis,
+            target.span,
+            "`this` is the receiver itself and cannot be reassigned",
+          )
+          .with_help("assign to one of its fields: `this.f = x`"),
+        );
+        None
+      }
+      ExprKind::Field { .. } => {
+        let ty = self.check_expr(target, None);
+        match self.field_accesses.get(&target.id).copied() {
+          Some(FieldAccess::Field { .. }) => Some(ty),
+          Some(FieldAccess::Length) => {
+            self.report(
+              CompileError::at(
+                ErrorCode::InvalidAssignmentTarget,
+                target.span,
+                "`length` is computed, not stored",
+              )
+              .with_help("change the collection instead: `push`, `pop`, `remove`"),
+            );
+            None
+          }
+          None => None,
+        }
+      }
+      ExprKind::Index { .. } => {
+        let ty = self.check_expr(target, None);
+        (ty != TypeId::ERROR).then_some(ty)
+      }
+      _ => {
+        self.report(
+          CompileError::at(
+            ErrorCode::InvalidAssignmentTarget,
+            target.span,
+            "only a name, a field or an index may be assigned to",
+          )
+          .with_note("assignment is a statement in Pump, never an expression"),
+        );
+        None
+      }
+    }
+  }
+
+  fn check_assign_identifier(&mut self, target: &Expr, name: &Ident) -> Option<TypeId> {
+    let binding = self.values.get(&target.id).copied()?;
+    match binding {
+      ValueBinding::Local(local) | ValueBinding::Captured(local) => {
+        let entry = self.locals[local.index()].clone();
+        // cai nay lay kieu khai
+        // `user = null` van hop le voi `User?` ke ca khi dang o trong
+        // `if user != null`
+        let ty = self.local_types[local.index()];
+        self.record(target.id, ty);
+        if entry.reassignable {
+          return Some(ty);
+        }
+        let captured_loop_binding = matches!(binding, ValueBinding::Captured(_))
+          && entry.origin == LocalOrigin::LoopBinding;
+        let error = if captured_loop_binding {
+          CompileError::at(
+            ErrorCode::MutableCaptureOfLoopBinding,
+            name.span,
+            format!(
+              "`{}` is a `for` binding captured by this closure",
+              name.name
+            ),
+          )
+          .with_secondary(entry.span, "bound fresh on every iteration")
+        } else {
+          match entry.origin {
+            LocalOrigin::LoopBinding => CompileError::at(
+              ErrorCode::CannotAssignToLoopBinding,
+              name.span,
+              format!("`{}` is bound fresh on every iteration", name.name),
+            )
+            .with_secondary(entry.span, "the `for` binding is here")
+            .with_help("copy it into a `let` first"),
+            LocalOrigin::CatchBinding => CompileError::at(
+              ErrorCode::CannotAssignToConst,
+              name.span,
+              format!("`{}` is the error bound by this `catch`", name.name),
+            )
+            .with_secondary(entry.span, "bound here"),
+            LocalOrigin::PatternBinding => CompileError::at(
+              ErrorCode::CannotAssignToConst,
+              name.span,
+              format!("`{}` is bound by a pattern and is immutable", name.name),
+            )
+            .with_secondary(entry.span, "bound here"),
+            _ => CompileError::at(
+              ErrorCode::CannotAssignToConst,
+              name.span,
+              format!("`{}` is a `const` binding", name.name),
+            )
+            .with_secondary(entry.span, "declared `const` here")
+            .with_help("declare it with `let` to allow reassignment"),
+          }
+        };
+        self.report(error);
+        Some(ty)
+      }
+      ValueBinding::Field { owner, index } => {
+        let ty = self
+          .context
+          .def(owner)
+          .as_struct()
+          .and_then(|structure| structure.fields.get(index as usize))
+          .map(|field| field.ty)
+          .unwrap_or(TypeId::ERROR);
+        self.record(target.id, ty);
+        self.field_accesses
+          .insert(target.id, FieldAccess::Field { owner, index });
+        Some(ty)
+      }
+      ValueBinding::GlobalConst(global) => {
+        let ty = self.global_types[global.index()];
+        let declared = self.globals[global.index()].span;
+        self.record(target.id, ty);
+        self.report(
+          CompileError::at(
+            ErrorCode::CannotAssignToConst,
+            name.span,
+            format!("`{}` is a module constant", name.name),
+          )
+          .with_secondary(declared, "declared here")
+          .with_note("module level admits `const` only; Pump 1.0 has no mutable globals"),
+        );
+        Some(ty)
+      }
+      _ => {
+        self.report(CompileError::at(
+          ErrorCode::InvalidAssignmentTarget,
+          name.span,
+          format!("`{}` does not name a storage location", name.name),
+        ));
+        None
+      }
+    }
+  }
+
+  fn assigned_local(&self, target: &Expr) -> Option<LocalId> {
+    if !matches!(target.kind, ExprKind::Ident(_)) {
+      return None;
+    }
+    match self.values.get(&target.id)? {
+      ValueBinding::Local(local) | ValueBinding::Captured(local) => Some(*local),
+      _ => None,
+    }
+  }
+}
+
+impl Checker<'_> {
+  fn check_condition(&mut self, expr: &Expr) -> Facts {
+    match &expr.kind {
+      ExprKind::Group(inner) => {
+        let facts = self.check_condition(inner);
+        self.record(expr.id, TypeId::BOOL);
+        facts
+      }
+      ExprKind::Unary {
+        op: UnaryOp::Not,
+        operand,
+      } => {
+        let facts = self.check_condition(operand);
+        self.record(expr.id, TypeId::BOOL);
+        facts.inverted()
+      }
+      ExprKind::Binary {
+        op: BinaryOp::And,
+        lhs,
+        rhs,
+      } => {
+        let left = self.check_condition(lhs);
+        let saved = self.narrowings.clone();
+        for (&local, &ty) in &left.when_true {
+          self.narrowings.insert(local, ty);
+        }
+        let right = self.check_condition(rhs);
+        self.narrowings = saved;
+
+        let mut when_true = left.when_true;
+        when_true.extend(right.when_true);
+        self.record(expr.id, TypeId::BOOL);
+        Facts {
+          when_true,
+          when_false: Narrowings::new(),
+        }
+      }
+      ExprKind::Binary {
+        op: BinaryOp::Or,
+        lhs,
+        rhs,
+      } => {
+        self.check_condition(lhs);
+        self.check_condition(rhs);
+        self.record(expr.id, TypeId::BOOL);
+        // `||` co y khong chung minh duoc gi o ca hai nhanh (D-25)
+        Facts::default()
+      }
+      ExprKind::Binary {
+        op: op @ (BinaryOp::Eq | BinaryOp::Ne),
+        lhs,
+        rhs,
+      } => {
+        let ty = self.check_expr(expr, Some(TypeId::BOOL));
+        self.demand_bool(ty, expr.span);
+        self.null_test_facts(*op, lhs, rhs)
+      }
+      _ => {
+        let ty = self.check_value(expr, Some(TypeId::BOOL));
+        self.demand_bool(ty, expr.span);
+        Facts::default()
+      }
+    }
+  }
+
+  fn demand_bool(&mut self, ty: TypeId, span: Span) {
+    if self.is_boolish(ty) {
+      return;
+    }
+    let shown = self.show(ty);
+    self.report(
+      CompileError::at(
+        ErrorCode::NoTruthiness,
+        span,
+        format!("a condition must be `bool`, but this is `{shown}`"),
+      )
+      .with_caret(format!("this is `{shown}`"))
+      .with_help(self.suggest_boolean_test(ty)),
+    );
+  }
+
+  fn null_test_facts(&mut self, op: BinaryOp, lhs: &Expr, rhs: &Expr) -> Facts {
+    let subject = if matches!(pee_gro(rhs).kind, ExprKind::Null) {
+      lhs
+    } else if matches!(pee_gro(lhs).kind, ExprKind::Null) {
+      rhs
+    } else {
+      return Facts::default();
+    };
+    let Some((local, inner)) = self.narrowable_local(subject) else {
+      return Facts::default();
+    };
+    let mut facts = Facts::default();
+    match op {
+      BinaryOp::Ne => {
+        facts.when_true.insert(local, inner);
+      }
+      BinaryOp::Eq => {
+        facts.when_false.insert(local, inner);
+      }
+      _ => {}
+    }
+    facts
+  }
+
+  /// The assignment that ended `expr`'s narrowing, when there was one.
+  fn defeated_at(&self, expr: &Expr) -> Option<Span> {
+    let expr = pee_gro(expr);
+    if !matches!(expr.kind, ExprKind::Ident(_)) {
+      return None;
+    }
+    let local = match self.values.get(&expr.id)? {
+      ValueBinding::Local(local) | ValueBinding::Captured(local) => *local,
+      _ => return None,
+    };
+    self.defeated.get(&local).copied()
+  }
+
+  fn narrowable_local(&self, expr: &Expr) -> Option<(LocalId, TypeId)> {
+    let expr = pee_gro(expr);
+    if !matches!(expr.kind, ExprKind::Ident(_)) {
+      return None;
+    }
+    let local = match self.values.get(&expr.id)? {
+      ValueBinding::Local(local) | ValueBinding::Captured(local) => *local,
+      _ => return None,
+    };
+    let ty = self.context.shallow_resolve(self.local_type(local));
+    match *self.context.kind(ty) {
+      TypeKind::Optional(inner) => Some((local, inner)),
+      _ => None,
+    }
   }
 }
