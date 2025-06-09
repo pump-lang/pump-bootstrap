@@ -2246,7 +2246,7 @@ impl Checker<'_> {
     rhs: &Expr,
     span: Span,
   ) -> TypeId {
-    // `x == null` ...
+    // `x == null` la phep so sanh duy nhat bang qua ranh gioi optional
     let comparing_null =
       matches!(lhs.kind, ExprKind::Null) || matches!(rhs.kind, ExprKind::Null);
     if comparing_null {
@@ -2458,4 +2458,890 @@ fn is_untyped_literal(expr: &Expr) -> bool {
     } => is_untyped_literal(operand),
     _ => false,
   }
+}
+
+impl Checker<'_> {
+  fn check_assignment(&mut self, assign: &AssignStmt) {
+    let target = self.check_assign_target(&assign.target);
+    let value = self.check_value(&assign.value, target);
+
+    if let Some(target) = target {
+      match assign.op.binary_op() {
+        None => self.expect_assignable(target, value, assign.value.span, "this assignment"),
+        Some(op) => {
+          let produced = self.check_arithmetic(op, target, value, assign.span);
+          self.expect_assignable(
+            target,
+            produced,
+            assign.span,
+            "this compound assignment",
+          );
+        }
+      }
+    }
+
+    // ghi vao mot local da thu hep thi ket thuc thu hep ngay tai day. D-25
+    // con pha no tren ca vung nao chua phep ghi do nua, cai do `surviving`
+    // lo khi buoc vao vung.
+    if let Some(local) = self.assigned_local(&assign.target) {
+      self.narrowings.remove(&local);
+    }
+  }
+
+  fn check_assign_target(&mut self, target: &Expr) -> Option<TypeId> {
+    match &target.kind {
+      ExprKind::Ident(name) => self.check_assign_identifier(target, name),
+      ExprKind::This => {
+        self.report(
+          CompileError::at(
+            ErrorCode::CannotAssignToThis,
+            target.span,
+            "`this` is the receiver itself and cannot be reassigned",
+          )
+          .with_help("assign to one of its fields: `this.f = x`"),
+        );
+        None
+      }
+      ExprKind::Field { .. } => {
+        let ty = self.check_expr(target, None);
+        match self.field_accesses.get(&target.id).copied() {
+          Some(FieldAccess::Field { .. }) => Some(ty),
+          Some(FieldAccess::Length) => {
+            self.report(
+              CompileError::at(
+                ErrorCode::InvalidAssignmentTarget,
+                target.span,
+                "`length` is computed, not stored",
+              )
+              .with_help("change the collection instead: `push`, `pop`, `remove`"),
+            );
+            None
+          }
+          None => None,
+        }
+      }
+      ExprKind::Index { .. } => {
+        let ty = self.check_expr(target, None);
+        (ty != TypeId::ERROR).then_some(ty)
+      }
+      _ => {
+        self.report(
+          CompileError::at(
+            ErrorCode::InvalidAssignmentTarget,
+            target.span,
+            "only a name, a field or an index may be assigned to",
+          )
+          .with_note("assignment is a statement in Pump, never an expression"),
+        );
+        None
+      }
+    }
+  }
+
+  fn check_assign_identifier(&mut self, target: &Expr, name: &Ident) -> Option<TypeId> {
+    let binding = self.values.get(&target.id).copied()?;
+    match binding {
+      ValueBinding::Local(local) | ValueBinding::Captured(local) => {
+        let entry = self.locals[local.index()].clone();
+        // cai nay lay kieu khai
+        // `user = null` van hop le voi `User?` ke ca khi dang o trong
+        // `if user != null`
+        let ty = self.local_types[local.index()];
+        self.record(target.id, ty);
+        if entry.reassignable {
+          return Some(ty);
+        }
+        let captured_loop_binding = matches!(binding, ValueBinding::Captured(_))
+          && entry.origin == LocalOrigin::LoopBinding;
+        let error = if captured_loop_binding {
+          CompileError::at(
+            ErrorCode::MutableCaptureOfLoopBinding,
+            name.span,
+            format!(
+              "`{}` is a `for` binding captured by this closure",
+              name.name
+            ),
+          )
+          .with_secondary(entry.span, "bound fresh on every iteration")
+        } else {
+          match entry.origin {
+            LocalOrigin::LoopBinding => CompileError::at(
+              ErrorCode::CannotAssignToLoopBinding,
+              name.span,
+              format!("`{}` is bound fresh on every iteration", name.name),
+            )
+            .with_secondary(entry.span, "the `for` binding is here")
+            .with_help("copy it into a `let` first"),
+            LocalOrigin::CatchBinding => CompileError::at(
+              ErrorCode::CannotAssignToConst,
+              name.span,
+              format!("`{}` is the error bound by this `catch`", name.name),
+            )
+            .with_secondary(entry.span, "bound here"),
+            LocalOrigin::PatternBinding => CompileError::at(
+              ErrorCode::CannotAssignToConst,
+              name.span,
+              format!("`{}` is bound by a pattern and is immutable", name.name),
+            )
+            .with_secondary(entry.span, "bound here"),
+            _ => CompileError::at(
+              ErrorCode::CannotAssignToConst,
+              name.span,
+              format!("`{}` is a `const` binding", name.name),
+            )
+            .with_secondary(entry.span, "declared `const` here")
+            .with_help("declare it with `let` to allow reassignment"),
+          }
+        };
+        self.report(error);
+        Some(ty)
+      }
+      ValueBinding::Field { owner, index } => {
+        let ty = self
+          .context
+          .def(owner)
+          .as_struct()
+          .and_then(|structure| structure.fields.get(index as usize))
+          .map(|field| field.ty)
+          .unwrap_or(TypeId::ERROR);
+        self.record(target.id, ty);
+        self.field_accesses
+          .insert(target.id, FieldAccess::Field { owner, index });
+        Some(ty)
+      }
+      ValueBinding::GlobalConst(global) => {
+        let ty = self.global_types[global.index()];
+        let declared = self.globals[global.index()].span;
+        self.record(target.id, ty);
+        self.report(
+          CompileError::at(
+            ErrorCode::CannotAssignToConst,
+            name.span,
+            format!("`{}` is a module constant", name.name),
+          )
+          .with_secondary(declared, "declared here")
+          .with_note("module level admits `const` only; Pump 1.0 has no mutable globals"),
+        );
+        Some(ty)
+      }
+      _ => {
+        self.report(CompileError::at(
+          ErrorCode::InvalidAssignmentTarget,
+          name.span,
+          format!("`{}` does not name a storage location", name.name),
+        ));
+        None
+      }
+    }
+  }
+
+  fn assigned_local(&self, target: &Expr) -> Option<LocalId> {
+    if !matches!(target.kind, ExprKind::Ident(_)) {
+      return None;
+    }
+    match self.values.get(&target.id)? {
+      ValueBinding::Local(local) | ValueBinding::Captured(local) => Some(*local),
+      _ => None,
+    }
+  }
+}
+
+impl Checker<'_> {
+  fn check_condition(&mut self, expr: &Expr) -> Facts {
+    match &expr.kind {
+      ExprKind::Group(inner) => {
+        let facts = self.check_condition(inner);
+        self.record(expr.id, TypeId::BOOL);
+        facts
+      }
+      ExprKind::Unary {
+        op: UnaryOp::Not,
+        operand,
+      } => {
+        let facts = self.check_condition(operand);
+        self.record(expr.id, TypeId::BOOL);
+        facts.inverted()
+      }
+      ExprKind::Binary {
+        op: BinaryOp::And,
+        lhs,
+        rhs,
+      } => {
+        let left = self.check_condition(lhs);
+        let saved = self.narrowings.clone();
+        for (&local, &ty) in &left.when_true {
+          self.narrowings.insert(local, ty);
+        }
+        let right = self.check_condition(rhs);
+        self.narrowings = saved;
+
+        let mut when_true = left.when_true;
+        when_true.extend(right.when_true);
+        self.record(expr.id, TypeId::BOOL);
+        Facts {
+          when_true,
+          when_false: Narrowings::new(),
+        }
+      }
+      ExprKind::Binary {
+        op: BinaryOp::Or,
+        lhs,
+        rhs,
+      } => {
+        self.check_condition(lhs);
+        self.check_condition(rhs);
+        self.record(expr.id, TypeId::BOOL);
+        // `||` co y khong chung minh duoc gi o ca hai nhanh (D-25)
+        Facts::default()
+      }
+      ExprKind::Binary {
+        op: op @ (BinaryOp::Eq | BinaryOp::Ne),
+        lhs,
+        rhs,
+      } => {
+        let ty = self.check_expr(expr, Some(TypeId::BOOL));
+        self.demand_bool(ty, expr.span);
+        self.null_test_facts(*op, lhs, rhs)
+      }
+      _ => {
+        let ty = self.check_value(expr, Some(TypeId::BOOL));
+        self.demand_bool(ty, expr.span);
+        Facts::default()
+      }
+    }
+  }
+
+  fn demand_bool(&mut self, ty: TypeId, span: Span) {
+    if self.is_boolish(ty) {
+      return;
+    }
+    let shown = self.show(ty);
+    self.report(
+      CompileError::at(
+        ErrorCode::NoTruthiness,
+        span,
+        format!("a condition must be `bool`, but this is `{shown}`"),
+      )
+      .with_caret(format!("this is `{shown}`"))
+      .with_help(self.suggest_boolean_test(ty)),
+    );
+  }
+
+  fn null_test_facts(&mut self, op: BinaryOp, lhs: &Expr, rhs: &Expr) -> Facts {
+    let subject = if matches!(pee_gro(rhs).kind, ExprKind::Null) {
+      lhs
+    } else if matches!(pee_gro(lhs).kind, ExprKind::Null) {
+      rhs
+    } else {
+      return Facts::default();
+    };
+    let Some((local, inner)) = self.narrowable_local(subject) else {
+      return Facts::default();
+    };
+    let mut facts = Facts::default();
+    match op {
+      BinaryOp::Ne => {
+        facts.when_true.insert(local, inner);
+      }
+      BinaryOp::Eq => {
+        facts.when_false.insert(local, inner);
+      }
+      _ => {}
+    }
+    facts
+  }
+
+  /// The assignment that ended `expr`'s narrowing, when there was one.
+  fn defeated_at(&self, expr: &Expr) -> Option<Span> {
+    let expr = pee_gro(expr);
+    if !matches!(expr.kind, ExprKind::Ident(_)) {
+      return None;
+    }
+    let local = match self.values.get(&expr.id)? {
+      ValueBinding::Local(local) | ValueBinding::Captured(local) => *local,
+      _ => return None,
+    };
+    self.defeated.get(&local).copied()
+  }
+
+  fn narrowable_local(&self, expr: &Expr) -> Option<(LocalId, TypeId)> {
+    let expr = pee_gro(expr);
+    if !matches!(expr.kind, ExprKind::Ident(_)) {
+      return None;
+    }
+    let local = match self.values.get(&expr.id)? {
+      ValueBinding::Local(local) | ValueBinding::Captured(local) => *local,
+      _ => return None,
+    };
+    let ty = self.context.shallow_resolve(self.local_type(local));
+    match *self.context.kind(ty) {
+      TypeKind::Optional(inner) => Some((local, inner)),
+      _ => None,
+    }
+  }
+}
+
+fn pee_gro(expr: &Expr) -> &Expr {
+  let mut current = expr;
+  while let ExprKind::Group(inner) = &current.kind {
+    current = inner;
+  }
+  current
+}
+
+const WITNESS_LIMIT: usize = 4;
+
+const EXPANSION_LIMIT: usize = 64;
+
+impl Checker<'_> {
+  fn check_match(&mut self, statement: &MatchStmt) -> bool {
+    let scrutinee = self.check_value(&statement.scrutinee, None);
+    let scrutinee = self.context.shallow_resolve(scrutinee);
+
+    let mut matrix: Vec<Vec<Deconstructed>> = Vec::new();
+    let mut every_arm_diverges = !statement.arms.is_empty();
+
+    for arm in &statement.arms {
+      let saved = self.narrowings.clone();
+      self.check_pattern(&arm.pattern, scrutinee);
+
+      let rows = self.deconstruct(&arm.pattern, scrutinee);
+      let guarded = arm.guard.is_some();
+      if !guarded {
+        let reachable = rows
+          .iter()
+          .any(|row| self.is_useful(&matrix, std::slice::from_ref(row)));
+        if !reachable {
+          self.report(
+            CompileError::at(
+              ErrorCode::UnreachableMatchArm,
+              arm.pattern.span,
+              "an earlier arm already covers every value this one matches",
+            )
+            .with_note("arms are tried in source order"),
+          );
+        }
+        matrix.extend(rows.into_iter().map(|row| vec![row]));
+      }
+
+      if let Some(guard) = &arm.guard {
+        let ty = self.check_value(guard, Some(TypeId::BOOL));
+        self.demand_bool(ty, guard.span);
+      }
+
+      let diverges = match &arm.body {
+        MatchArmBody::Block(block) => self.check_block(block),
+        MatchArmBody::Stmt(inner) => self.check_stmt(inner, &[]),
+      };
+      every_arm_diverges &= diverges;
+      self.narrowings = saved;
+    }
+
+    let query = vec![Deconstructed::wildcard(scrutinee)];
+    let missing = self.witnesses(&matrix, &query);
+    if !missing.is_empty() {
+      let shown = self.show(scrutinee);
+      let mut error = CompileError::at(
+        ErrorCode::NonExhaustiveMatch,
+        statement.span,
+        format!("this `match` on `{shown}` does not cover every value"),
+      )
+      .with_caret("some values reach no arm");
+      for witness in missing.iter().take(WITNESS_LIMIT) {
+        let rendered = self.render_witness(&witness[0]);
+        error = error.with_note(format!("`{rendered}` is not covered"));
+      }
+      if missing.len() > WITNESS_LIMIT {
+        error = error.with_note(format!("and {} more", missing.len() - WITNESS_LIMIT));
+      }
+      error = error.with_help("add the missing arms, or a `_` arm");
+      self.report(error);
+      return false;
+    }
+
+    every_arm_diverges
+  }
+
+  fn check_pattern(&mut self, pattern: &Pattern, expected: TypeId) {
+    let expected = self.context.shallow_resolve(expected);
+    self.pattern_types.insert(pattern.id, expected);
+
+    // moi pattern tru `_`, mot binding va `null` deu nhin xuyen qua `T?`,
+    // co the thi `match opt { null => ..., 1 => ... }` moi check duoc
+    // (13.4.4)
+    let target = match *self.context.kind(expected) {
+      TypeKind::Optional(inner) if !covers_the_whole_optional(&pattern.kind) => inner,
+      _ => expected,
+    };
+
+    match &pattern.kind {
+      PatternKind::Wildcard => {}
+      PatternKind::Binding(name) => {
+        self.bind_local(name, expected);
+      }
+      PatternKind::Null => {
+        if !matches!(
+          self.context.kind(expected),
+          TypeKind::Optional(_) | TypeKind::Error | TypeKind::Never
+        ) {
+          let shown = self.show(expected);
+          self.report(
+            CompileError::at(
+              ErrorCode::PatternTypeMismatch,
+              pattern.span,
+              format!("`{shown}` is never `null`"),
+            )
+            .with_help(format!("declare it as `{shown}?` if it can be absent")),
+          );
+        }
+      }
+      PatternKind::Bool(_) => self.expect_pattern_type(TypeId::BOOL, target, pattern.span),
+      PatternKind::Int {
+        magnitude,
+        negative,
+      } => self.check_int_pattern(*magnitude, *negative, target, pattern.span),
+      PatternKind::Char(_) => self.expect_pattern_type(TypeId::CHAR, target, pattern.span),
+      PatternKind::Str(_) => self.expect_pattern_type(TypeId::STRING, target, pattern.span),
+      PatternKind::Range {
+        start,
+        end,
+        inclusive,
+      } => self.check_range_pattern(*start, *end, *inclusive, target, pattern.span),
+      PatternKind::Variant {
+        enum_name,
+        variant,
+        payload,
+      } => {
+        self.check_variant_pattern(pattern, enum_name, variant, payload.as_deref(), target)
+      }
+      PatternKind::Struct { fields, rest, .. } => {
+        self.check_struct_pattern(pattern, fields, *rest, target)
+      }
+      PatternKind::Tuple(elements) => self.check_tuple_pattern(pattern, elements, target),
+      PatternKind::Or(alternatives) => self.check_or_pattern(alternatives, expected),
+    }
+  }
+
+  fn expect_pattern_type(&mut self, wanted: TypeId, actual: TypeId, span: Span) {
+    if actual == TypeId::ERROR || self.assignable(actual, wanted) {
+      return;
+    }
+    let expected = self.show(wanted);
+    let found = self.show(actual);
+    self.report(
+      CompileError::at(
+        ErrorCode::PatternTypeMismatch,
+        span,
+        format!("this pattern matches `{expected}`, but the value is `{found}`"),
+      )
+      .with_caret(format!("a `{expected}` pattern")),
+    );
+  }
+
+  fn check_int_pattern(&mut self, magnitude: u64, negative: bool, target: TypeId, span: Span) {
+    if target == TypeId::ERROR {
+      return;
+    }
+    if !self.context.is_integer(target) {
+      self.expect_pattern_type(TypeId::INT, target, span);
+      return;
+    }
+    if negative && matches!(self.context.kind(target), TypeKind::Uint) {
+      self.report(
+        CompileError::at(
+          ErrorCode::NegateUnsigned,
+          span,
+          "`uint` has no negative values, so this pattern can never match",
+        )
+        .with_help("drop the sign, or match on an `int`"),
+      );
+      return;
+    }
+    let limit = if negative {
+      1u64 << 63
+    } else {
+      i64::MAX as u64
+    };
+    if matches!(self.context.kind(target), TypeKind::Int) && magnitude > limit {
+      self.report(CompileError::at(
+        ErrorCode::LiteralOutOfRange,
+        span,
+        format!("`{magnitude}` does not fit in `int`, so this pattern can never match"),
+      ));
+    }
+  }
+
+  fn check_range_pattern(
+    &mut self,
+    start: RangeEndpoint,
+    end: RangeEndpoint,
+    inclusive: bool,
+    target: TypeId,
+    span: Span,
+  ) {
+    let ordered = match (start, end) {
+      (RangeEndpoint::Int { .. }, RangeEndpoint::Int { .. }) => {
+        if !self.context.is_integer(target) && target != TypeId::ERROR {
+          self.expect_pattern_type(TypeId::INT, target, span);
+          return;
+        }
+        endpoint_value(start) <= endpoint_value(end)
+      }
+      (RangeEndpoint::Char(_), RangeEndpoint::Char(_)) => {
+        self.expect_pattern_type(TypeId::CHAR, target, span);
+        endpoint_value(start) <= endpoint_value(end)
+      }
+      _ => {
+        self.report(
+          CompileError::at(
+            ErrorCode::InvalidRangePattern,
+            span,
+            "both endpoints must be integers, or both must be characters",
+          )
+          .with_note("a range pattern never mixes the two"),
+        );
+        return;
+      }
+    };
+    if !ordered {
+      self.report(
+        CompileError::at(
+          ErrorCode::InvalidRangePattern,
+          span,
+          "the low endpoint is above the high one, so this range is empty",
+        )
+        .with_help("swap the endpoints"),
+      );
+      return;
+    }
+    if !inclusive && endpoint_value(start) == endpoint_value(end) {
+      self.report(
+        CompileError::at(
+          ErrorCode::InvalidRangePattern,
+          span,
+          "an exclusive range with equal endpoints matches nothing",
+        )
+        .with_help("write `..=` to include the endpoint"),
+      );
+    }
+  }
+
+  fn check_variant_pattern(
+    &mut self,
+    pattern: &Pattern,
+    enum_name: &Ident,
+    variant: &Ident,
+    payload: Option<&[Pattern]>,
+    target: TypeId,
+  ) {
+    let Some(declared) = self.pattern_defs.get(&pattern.id).copied() else {
+      // resolver khong tim thay kieu va da bao roi
+      return;
+    };
+    let Some((def, args)) = self.named_pattern_subject(target, pattern.span, enum_name) else {
+      return;
+    };
+    if def != declared {
+      self.report_pattern_subject_mismatch(declared, target, pattern.span);
+      return;
+    }
+    let Some(enumeration) = self.context.def(def).as_enum().cloned() else {
+      let shown = self.context.def(def).name.clone();
+      self.report(
+        CompileError::at(
+          ErrorCode::NotAnEnum,
+          pattern.span,
+          format!("`{shown}` is not an enum, so it has no variants"),
+        )
+        .with_help("match a struct with `Name { .. }`"),
+      );
+      return;
+    };
+    let Some(index) = enumeration.variant_index(&variant.name) else {
+      let owner = self.context.def(def).name.clone();
+      let names: Vec<&str> = enumeration
+        .variants
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+      self.report(
+        CompileError::at(
+          ErrorCode::UnknownVariant,
+          variant.span,
+          format!("`{owner}` has no variant `{}`", variant.name),
+        )
+        .with_note(format!("its variants are {}", join_names(&names))),
+      );
+      return;
+    };
+
+    let payload_types: Vec<TypeId> = enumeration.variants[index]
+      .payload
+      .clone()
+      .into_iter()
+      .map(|ty| self.context.substitute(ty, GenericOwner::Type(def), &args))
+      .collect();
+
+    match payload {
+      None => {
+        if !payload_types.is_empty() {
+          let owner = self.context.def(def).name.clone();
+          let holes = vec!["_"; payload_types.len()].join(", ");
+          self.report(
+            CompileError::at(
+              ErrorCode::PatternTypeMismatch,
+              pattern.span,
+              format!(
+                "`{}` carries {} value{}, so it needs a payload pattern",
+                variant.name,
+                payload_types.len(),
+                if payload_types.len() == 1 { "" } else { "s" }
+              ),
+            )
+            .with_help(format!("write `{owner}.{}({holes})`", variant.name)),
+          );
+        }
+      }
+      Some(elements) => {
+        if elements.len() != payload_types.len() {
+          self.report(CompileError::at(
+            ErrorCode::WrongArgumentCount,
+            pattern.span,
+            format!(
+              "`{}` carries {} value{}, but this pattern binds {}",
+              variant.name,
+              payload_types.len(),
+              if payload_types.len() == 1 { "" } else { "s" },
+              elements.len()
+            ),
+          ));
+        }
+        for (element, ty) in elements.iter().zip(payload_types) {
+          self.check_pattern(element, ty);
+        }
+        for element in elements.iter().skip(
+          enumeration.variants[index]
+            .payload
+            .len()
+            .min(elements.len()),
+        ) {
+          self.check_pattern(element, TypeId::ERROR);
+        }
+      }
+    }
+  }
+
+  fn check_struct_pattern(
+    &mut self,
+    pattern: &Pattern,
+    fields: &[crate::ast::FieldPattern],
+    rest: bool,
+    target: TypeId,
+  ) {
+    let Some(declared) = self.pattern_defs.get(&pattern.id).copied() else {
+      return;
+    };
+    let name = self.context.def(declared).name.clone();
+    let subject = Ident::new(name.clone(), pattern.span);
+    let Some((def, args)) = self.named_pattern_subject(target, pattern.span, &subject) else {
+      return;
+    };
+    if def != declared {
+      self.report_pattern_subject_mismatch(declared, target, pattern.span);
+      return;
+    }
+    let Some(structure) = self.context.def(def).as_struct().cloned() else {
+      self.report(
+        CompileError::at(
+          ErrorCode::NotAStruct,
+          pattern.span,
+          format!("`{name}` is not a struct, so it has no fields"),
+        )
+        .with_help("match an enum variant with `Enum.Variant`"),
+      );
+      return;
+    };
+
+    let mut covered = vec![false; structure.fields.len()];
+    for field in fields {
+      let Some(index) = structure.field_index(&field.name.name) else {
+        let names: Vec<&str> = structure
+          .fields
+          .iter()
+          .map(|entry| entry.name.as_str())
+          .collect();
+        self.report(
+          CompileError::at(
+            ErrorCode::UnknownStructField,
+            field.name.span,
+            format!("`{name}` has no field `{}`", field.name.name),
+          )
+          .with_note(format!("its fields are {}", join_names(&names))),
+        );
+        if let Some(inner) = &field.pattern {
+          self.check_pattern(inner, TypeId::ERROR);
+        }
+        continue;
+      };
+      if covered[index] {
+        self.report(CompileError::at(
+          ErrorCode::DuplicateField,
+          field.name.span,
+          format!("`{}` is matched twice in this pattern", field.name.name),
+        ));
+      }
+      covered[index] = true;
+
+      let declared_field = structure.fields[index].clone();
+      self.check_field_visibility(def, &declared_field, field.name.span);
+      let ty = self
+        .context
+        .substitute(declared_field.ty, GenericOwner::Type(def), &args);
+      match &field.pattern {
+        Some(inner) => self.check_pattern(inner, ty),
+        None => {
+          self.bind_local(&field.name, ty);
+        }
+      }
+    }
+
+    if !rest {
+      let missing: Vec<&str> = structure
+        .fields
+        .iter()
+        .zip(&covered)
+        .filter(|(_, seen)| !**seen)
+        .map(|(field, _)| field.name.as_str())
+        .collect();
+      if !missing.is_empty() {
+        self.report(
+          CompileError::at(
+            ErrorCode::MissingStructField,
+            pattern.span,
+            format!("this pattern does not mention {}", join_names(&missing)),
+          )
+          .with_help("list the remaining fields, or end the pattern with `..`"),
+        );
+      }
+    }
+  }
+
+  fn check_tuple_pattern(&mut self, pattern: &Pattern, elements: &[Pattern], target: TypeId) {
+    match self.context.kind(target).clone() {
+      TypeKind::Tuple(parts) if parts.len() == elements.len() => {
+        for (element, part) in elements.iter().zip(parts) {
+          self.check_pattern(element, part);
+        }
+      }
+      TypeKind::Error => {
+        for element in elements {
+          self.check_pattern(element, TypeId::ERROR);
+        }
+      }
+      _ => {
+        let shown = self.show(target);
+        self.report(CompileError::at(
+          ErrorCode::PatternTypeMismatch,
+          pattern.span,
+          format!(
+            "this pattern matches a {}-tuple, but the value is `{shown}`",
+            elements.len()
+          ),
+        ));
+        for element in elements {
+          self.check_pattern(element, TypeId::ERROR);
+        }
+      }
+    }
+  }
+
+  fn check_or_pattern(&mut self, alternatives: &[Pattern], expected: TypeId) {
+    let mut reference: Option<(Span, Vec<(String, String)>)> = None;
+    for alternative in alternatives {
+      self.check_pattern(alternative, expected);
+      let bindings = self.pattern_binding_types(alternative);
+      match &reference {
+        None => reference = Some((alternative.span, bindings)),
+        Some((first_span, first)) => {
+          if bindings != *first {
+            let first_span = *first_span;
+            let expected = describe_bindings(first);
+            let found = describe_bindings(&bindings);
+            self.report(
+              CompileError::at(
+                ErrorCode::OrPatternBindingMismatch,
+                alternative.span,
+                format!("this alternative binds {found}"),
+              )
+              .with_secondary(first_span, format!("this one binds {expected}"))
+              .with_note(
+                "every alternative of an or-pattern must bind the same names \
+                 at the same types",
+              ),
+            );
+            return;
+          }
+        }
+      }
+    }
+  }
+
+  fn named_pattern_subject(
+    &mut self,
+    target: TypeId,
+    span: Span,
+    subject: &Ident,
+  ) -> Option<(DefId, Vec<TypeId>)> {
+    match self.context.kind(target).clone() {
+      TypeKind::Named { def, args } => Some((def, args)),
+      TypeKind::Error | TypeKind::Never => None,
+      _ => {
+        let shown = self.show(target);
+        self.report(CompileError::at(
+          ErrorCode::PatternTypeMismatch,
+          span,
+          format!(
+            "this pattern matches a `{}`, but the value is `{shown}`",
+            subject.name
+          ),
+        ));
+        None
+      }
+    }
+  }
+
+  fn report_pattern_subject_mismatch(&mut self, declared: DefId, target: TypeId, span: Span) {
+    let wanted = self.context.def(declared).name.clone();
+    let found = self.show(target);
+    self.report(CompileError::at(
+      ErrorCode::PatternTypeMismatch,
+      span,
+      format!("this pattern matches a `{wanted}`, but the value is `{found}`"),
+    ));
+  }
+
+  fn pattern_binding_types(&self, pattern: &Pattern) -> Vec<(String, String)> {
+    let mut names = Vec::new();
+    collect_pattern_bindings(pattern, &mut names);
+    let mut out: Vec<(String, String)> = names
+      .into_iter()
+      .map(|name| {
+        let ty = self
+          .declared_locals
+          .get(&name.span)
+          .map(|local| self.local_types[local.index()])
+          .unwrap_or(TypeId::ERROR);
+        (name.name.clone(), self.show(ty))
+      })
+      .collect();
+    out.sort();
+    out
+  }
+}
+
+fn covers_the_whole_optional(kind: &PatternKind) -> bool {
+  matches!(
+    kind,
+    PatternKind::Wildcard | PatternKind::Binding(_) | PatternKind::Null
+  )
 }
