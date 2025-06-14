@@ -2543,7 +2543,7 @@ impl Checker<'_> {
     match binding {
       ValueBinding::Local(local) | ValueBinding::Captured(local) => {
         let entry = self.locals[local.index()].clone();
-        // cai nay lay kieu khai
+        // lay kieu khai bao chu khong bao gio lay kieu da thu hep:
         // `user = null` van hop le voi `User?` ke ca khi dang o trong
         // `if user != null`
         let ty = self.local_types[local.index()];
@@ -3401,4 +3401,54 @@ fn describe_bindings(bindings: &[(String, String)]) -> String {
     .map(|(name, ty)| format!("`{name}: {ty}`"))
     .collect();
   rendered.join(", ")
+}
+
+fn join_names(names: &[&str]) -> String {
+  match names {
+    [] => "none".to_string(),
+    [only] => format!("`{only}`"),
+    [rest @ .., last] => {
+      let head: Vec<String> = rest.iter().map(|name| format!("`{name}`")).collect();
+      format!("{} and `{last}`", head.join(", "))
+    }
+  }
+}
+
+#[derive(Clone, Debug)]
+struct Deconstructed {
+  ctor: Ctor,
+  fields: Vec<Deconstructed>,
+  ty: TypeId,
+}
+
+impl Deconstructed {
+  fn wildcard(ty: TypeId) -> Deconstructed {
+    Deconstructed {
+      ctor: Ctor::Wildcard,
+      fields: Vec::new(),
+      ty,
+    }
+  }
+
+  fn leaf(ctor: Ctor, ty: TypeId) -> Deconstructed {
+    Deconstructed {
+      ctor,
+      fields: Vec::new(),
+      ty,
+    }
+  }
+}
+
+#[derive(Clone, PartialEq, Debug)]
+enum Ctor {
+  Wildcard,
+  Bool(bool),
+  Int(i128),
+  Char(char),
+  Str(String),
+  Opaque(u32),
+  Variant(u32),
+  Single,
+  Null,
+  Present,
 }
