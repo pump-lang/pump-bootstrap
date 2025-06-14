@@ -2214,7 +2214,7 @@ impl Checker<'_> {
       return TypeId::BOOL;
     }
 
-    // cai nay thu tu toan
+    // thu tu toan hang chi quan trong o cho: literal chua co kieu thi lay
     // kieu tu ben kia chu khong roi ve `int`
     let numeric_hint = expected.filter(|_| op.is_arithmetic() || op.is_bitwise());
     let (left, right) = if is_untyped_literal(lhs) && !is_untyped_literal(rhs) {
@@ -3390,4 +3390,15 @@ fn collect_pattern_bindings<'p>(pattern: &'p Pattern, out: &mut Vec<&'p Ident>) 
     }
     _ => {}
   }
+}
+
+fn describe_bindings(bindings: &[(String, String)]) -> String {
+  if bindings.is_empty() {
+    return "nothing".to_string();
+  }
+  let rendered: Vec<String> = bindings
+    .iter()
+    .map(|(name, ty)| format!("`{name}: {ty}`"))
+    .collect();
+  rendered.join(", ")
 }
