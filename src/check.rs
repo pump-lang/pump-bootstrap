@@ -3452,3 +3452,455 @@ enum Ctor {
   Null,
   Present,
 }
+
+enum CtorSet {
+  Closed(Vec<Ctor>),
+  Open,
+}
+
+impl Checker<'_> {
+  fn deconstruct(&mut self, pattern: &Pattern, expected: TypeId) -> Vec<Deconstructed> {
+    let ty = self.context.shallow_resolve(expected);
+    if let TypeKind::Optional(inner) = *self.context.kind(ty) {
+      if !covers_the_whole_optional(&pattern.kind) {
+        return self
+          .deconstruct(pattern, inner)
+          .into_iter()
+          .map(|field| Deconstructed {
+            ctor: Ctor::Present,
+            fields: vec![field],
+            ty,
+          })
+          .collect();
+      }
+    }
+
+    match &pattern.kind {
+      PatternKind::Wildcard | PatternKind::Binding(_) => vec![Deconstructed::wildcard(ty)],
+      PatternKind::Null => vec![Deconstructed::leaf(Ctor::Null, ty)],
+      PatternKind::Bool(value) => vec![Deconstructed::leaf(Ctor::Bool(*value), ty)],
+      PatternKind::Int {
+        magnitude,
+        negative,
+      } => {
+        let value = if *negative {
+          -(*magnitude as i128)
+        } else {
+          *magnitude as i128
+        };
+        vec![Deconstructed::leaf(Ctor::Int(value), ty)]
+      }
+      PatternKind::Char(value) => vec![Deconstructed::leaf(Ctor::Char(*value), ty)],
+      PatternKind::Str(value) => vec![Deconstructed::leaf(Ctor::Str(value.clone()), ty)],
+      PatternKind::Range { .. } => {
+        vec![Deconstructed::leaf(Ctor::Opaque(pattern.id.0), ty)]
+      }
+      PatternKind::Tuple(elements) => {
+        let parts = self.ctor_fields(&Ctor::Single, ty);
+        if parts.len() != elements.len() {
+          return vec![Deconstructed::wildcard(ty)];
+        }
+        self.deconstruct_fields(Ctor::Single, ty, elements.iter().zip(parts).collect())
+      }
+      PatternKind::Variant {
+        variant, payload, ..
+      } => {
+        let TypeKind::Named { def, .. } = *self.context.kind(ty) else {
+          return vec![Deconstructed::wildcard(ty)];
+        };
+        let Some(index) = self
+          .context
+          .def(def)
+          .as_enum()
+          .and_then(|enumeration| enumeration.variant_index(&variant.name))
+        else {
+          return vec![Deconstructed::wildcard(ty)];
+        };
+        let ctor = Ctor::Variant(index as u32);
+        let parts = self.ctor_fields(&ctor, ty);
+        let elements: Vec<&Pattern> = payload.iter().flatten().collect();
+        if elements.len() != parts.len() {
+          return vec![Deconstructed::wildcard(ty)];
+        }
+        self.deconstruct_fields(ctor, ty, elements.into_iter().zip(parts).collect())
+      }
+      PatternKind::Struct { fields, .. } => {
+        let TypeKind::Named { def, .. } = *self.context.kind(ty) else {
+          return vec![Deconstructed::wildcard(ty)];
+        };
+        let Some(structure) = self.context.def(def).as_struct().cloned() else {
+          return vec![Deconstructed::wildcard(ty)];
+        };
+        let parts = self.ctor_fields(&Ctor::Single, ty);
+        if parts.len() != structure.fields.len() {
+          return vec![Deconstructed::wildcard(ty)];
+        }
+        // truong bi bo, du la do `..` hay do pattern viet hong, deu
+        // tinh la mot cot wildcard
+        let mut columns: Vec<Vec<Deconstructed>> = parts
+          .iter()
+          .map(|&part| vec![Deconstructed::wildcard(part)])
+          .collect();
+        for field in fields {
+          let Some(index) = structure.field_index(&field.name.name) else {
+            continue;
+          };
+          columns[index] = match &field.pattern {
+            Some(inner) => self.deconstruct(inner, parts[index]),
+            None => vec![Deconstructed::wildcard(parts[index])],
+          };
+        }
+        combine(Ctor::Single, ty, columns)
+      }
+      PatternKind::Or(alternatives) => {
+        let mut out = Vec::new();
+        for alternative in alternatives {
+          out.extend(self.deconstruct(alternative, ty));
+          if out.len() > EXPANSION_LIMIT {
+            return vec![Deconstructed::wildcard(ty)];
+          }
+        }
+        out
+      }
+    }
+  }
+
+  fn deconstruct_fields(
+    &mut self,
+    ctor: Ctor,
+    ty: TypeId,
+    pairs: Vec<(&Pattern, TypeId)>,
+  ) -> Vec<Deconstructed> {
+    let columns: Vec<Vec<Deconstructed>> = pairs
+      .into_iter()
+      .map(|(pattern, part)| self.deconstruct(pattern, part))
+      .collect();
+    combine(ctor, ty, columns)
+  }
+
+  fn ctor_set(&self, ty: TypeId) -> CtorSet {
+    let ty = self.context.shallow_resolve(ty);
+    match self.context.kind(ty) {
+      TypeKind::Error | TypeKind::Never => CtorSet::Closed(Vec::new()),
+      TypeKind::Bool => CtorSet::Closed(vec![Ctor::Bool(false), Ctor::Bool(true)]),
+      TypeKind::Optional(_) => CtorSet::Closed(vec![Ctor::Null, Ctor::Present]),
+      TypeKind::Tuple(_) => CtorSet::Closed(vec![Ctor::Single]),
+      TypeKind::Named { def, .. } => match &self.context.def(*def).obj_kind {
+        crate::types::TypeDefKind::Struct(_) => CtorSet::Closed(vec![Ctor::Single]),
+        crate::types::TypeDefKind::Enum(enumeration) => CtorSet::Closed(
+          (0..enumeration.variants.len())
+            .map(|index| Ctor::Variant(index as u32))
+            .collect(),
+        ),
+        crate::types::TypeDefKind::Interface(_) => CtorSet::Open,
+      },
+      _ => CtorSet::Open,
+    }
+  }
+
+  fn ctor_fields(&mut self, ctor: &Ctor, ty: TypeId) -> Vec<TypeId> {
+    let ty = self.context.shallow_resolve(ty);
+    match ctor {
+      Ctor::Present => match *self.context.kind(ty) {
+        TypeKind::Optional(inner) => vec![inner],
+        _ => Vec::new(),
+      },
+      Ctor::Single => match self.context.kind(ty).clone() {
+        TypeKind::Tuple(parts) => parts,
+        TypeKind::Named { def, args } => {
+          let Some(structure) = self.context.def(def).as_struct().cloned() else {
+            return Vec::new();
+          };
+          structure
+            .fields
+            .iter()
+            .map(|field| {
+              self.context
+                .substitute(field.ty, GenericOwner::Type(def), &args)
+            })
+            .collect()
+        }
+        _ => Vec::new(),
+      },
+      Ctor::Variant(index) => {
+        let TypeKind::Named { def, args } = self.context.kind(ty).clone() else {
+          return Vec::new();
+        };
+        let Some(enumeration) = self.context.def(def).as_enum().cloned() else {
+          return Vec::new();
+        };
+        let Some(variant) = enumeration.variants.get(*index as usize) else {
+          return Vec::new();
+        };
+        variant
+          .payload
+          .clone()
+          .into_iter()
+          .map(|payload| {
+            self.context
+              .substitute(payload, GenericOwner::Type(def), &args)
+          })
+          .collect()
+      }
+      _ => Vec::new(),
+    }
+  }
+
+  fn specialise(
+    &mut self,
+    matrix: &[Vec<Deconstructed>],
+    ctor: &Ctor,
+    fields: &[TypeId],
+  ) -> Vec<Vec<Deconstructed>> {
+    let mut out = Vec::new();
+    for row in matrix {
+      let Some((head, rest)) = row.split_first() else {
+        continue;
+      };
+      if head.ctor == Ctor::Wildcard {
+        let mut expanded: Vec<Deconstructed> = fields
+          .iter()
+          .map(|&ty| Deconstructed::wildcard(ty))
+          .collect();
+        expanded.extend_from_slice(rest);
+        out.push(expanded);
+      } else if &head.ctor == ctor {
+        let mut expanded = head.fields.clone();
+        expanded.extend_from_slice(rest);
+        out.push(expanded);
+      }
+    }
+    out
+  }
+
+  fn is_useful(&mut self, matrix: &[Vec<Deconstructed>], row: &[Deconstructed]) -> bool {
+    let Some((head, rest)) = row.split_first() else {
+      return matrix.is_empty();
+    };
+    let ty = head.ty;
+
+    if head.ctor != Ctor::Wildcard {
+      let ctor = head.ctor.clone();
+      let fields = self.ctor_fields(&ctor, ty);
+      let specialised = self.specialise(matrix, &ctor, &fields);
+      let mut query = head.fields.clone();
+      query.extend_from_slice(rest);
+      return self.is_useful(&specialised, &query);
+    }
+
+    let used = hea_cto(matrix);
+    match self.ctor_set(ty) {
+      // khong co gi de suy luan. Dung bao gio ket luan mot nhanh khong
+      // toi duoc dua ...
+      CtorSet::Closed(all) if all.is_empty() => true,
+      CtorSet::Closed(all) if all.iter().all(|ctor| used.contains(ctor)) => {
+        for ctor in all {
+          let fields = self.ctor_fields(&ctor, ty);
+          let specialised = self.specialise(matrix, &ctor, &fields);
+          let mut query: Vec<Deconstructed> = fields
+            .iter()
+            .map(|&ty| Deconstructed::wildcard(ty))
+            .collect();
+          query.extend_from_slice(rest);
+          if self.is_useful(&specialised, &query) {
+            return true;
+          }
+        }
+        false
+      }
+      _ => {
+        let defaulted = default_matrix(matrix);
+        self.is_useful(&defaulted, rest)
+      }
+    }
+  }
+
+  fn witnesses(
+    &mut self,
+    matrix: &[Vec<Deconstructed>],
+    row: &[Deconstructed],
+  ) -> Vec<Vec<WitnessPat>> {
+    let Some((head, rest)) = row.split_first() else {
+      return if matrix.is_empty() {
+        vec![Vec::new()]
+      } else {
+        Vec::new()
+      };
+    };
+    let ty = head.ty;
+    let used = hea_cto(matrix);
+    let set = self.ctor_set(ty);
+
+    let (missing, open) = match &set {
+      CtorSet::Closed(all) => (
+        all.iter()
+          .filter(|ctor| !used.contains(ctor))
+          .cloned()
+          .collect::<Vec<Ctor>>(),
+        false,
+      ),
+      CtorSet::Open => (Vec::new(), true),
+    };
+
+    if !open && missing.is_empty() {
+      let CtorSet::Closed(all) = set else {
+        unreachable!("the open case was handled above")
+      };
+      let mut out = Vec::new();
+      for ctor in all {
+        let fields = self.ctor_fields(&ctor, ty);
+        let specialised = self.specialise(matrix, &ctor, &fields);
+        let mut query: Vec<Deconstructed> = fields
+          .iter()
+          .map(|&ty| Deconstructed::wildcard(ty))
+          .collect();
+        query.extend_from_slice(rest);
+        for witness in self.witnesses(&specialised, &query) {
+          out.push(self.apply_ctor(&ctor, ty, witness));
+          if out.len() >= WITNESS_LIMIT * 2 {
+            return out;
+          }
+        }
+      }
+      return out;
+    }
+
+    let defaulted = default_matrix(matrix);
+    let tails = self.witnesses(&defaulted, rest);
+    if tails.is_empty() {
+      return Vec::new();
+    }
+    let heads: Vec<WitnessPat> = if open {
+      vec![WitnessPat::Wildcard]
+    } else {
+      missing
+        .iter()
+        .map(|ctor| self.witness_of(ctor, ty))
+        .collect()
+    };
+
+    let mut out = Vec::new();
+    for tail in &tails {
+      for head in &heads {
+        let mut full = vec![head.clone()];
+        full.extend(tail.iter().cloned());
+        out.push(full);
+        if out.len() >= WITNESS_LIMIT * 2 {
+          return out;
+        }
+      }
+    }
+    out
+  }
+
+  fn apply_ctor(
+    &mut self,
+    ctor: &Ctor,
+    ty: TypeId,
+    mut witness: Vec<WitnessPat>,
+  ) -> Vec<WitnessPat> {
+    let arity = self.ctor_fields(ctor, ty).len();
+    let rest = witness.split_off(arity.min(witness.len()));
+    let mut fields = witness;
+    while fields.len() < arity {
+      fields.push(WitnessPat::Wildcard);
+    }
+    let mut out = vec![self.build_witness(ctor, ty, fields)];
+    out.extend(rest);
+    out
+  }
+
+  fn witness_of(&mut self, ctor: &Ctor, ty: TypeId) -> WitnessPat {
+    let arity = self.ctor_fields(ctor, ty).len();
+    self.build_witness(ctor, ty, vec![WitnessPat::Wildcard; arity])
+  }
+
+  fn build_witness(&self, ctor: &Ctor, ty: TypeId, fields: Vec<WitnessPat>) -> WitnessPat {
+    let ty = self.context.shallow_resolve(ty);
+    match ctor {
+      Ctor::Wildcard | Ctor::Opaque(_) => WitnessPat::Wildcard,
+      Ctor::Bool(value) => WitnessPat::Bool(*value),
+      Ctor::Int(value) => WitnessPat::Int(*value),
+      Ctor::Char(value) => WitnessPat::Char(*value),
+      Ctor::Str(value) => WitnessPat::Str(value.clone()),
+      Ctor::Null => WitnessPat::Null,
+      Ctor::Present => WitnessPat::Present(Box::new(
+        fields.into_iter().next().unwrap_or(WitnessPat::Wildcard),
+      )),
+      Ctor::Variant(index) => match *self.context.kind(ty) {
+        TypeKind::Named { def, .. } => WitnessPat::Variant {
+          def,
+          variant: *index,
+          fields,
+        },
+        _ => WitnessPat::Wildcard,
+      },
+      Ctor::Single => match *self.context.kind(ty) {
+        TypeKind::Tuple(_) => WitnessPat::Tuple(fields),
+        TypeKind::Named { def, .. } => WitnessPat::Struct { def, fields },
+        _ => WitnessPat::Wildcard,
+      },
+    }
+  }
+
+  fn render_witness(&self, witness: &WitnessPat) -> String {
+    match witness {
+      WitnessPat::Wildcard => "_".to_string(),
+      WitnessPat::Bool(value) => value.to_string(),
+      WitnessPat::Int(value) => value.to_string(),
+      WitnessPat::Char(value) => format!("'{value}'"),
+      WitnessPat::Str(value) => format!("\"{value}\""),
+      WitnessPat::Null => "null".to_string(),
+      WitnessPat::Present(inner) => self.render_witness(inner),
+      WitnessPat::Tuple(fields) => {
+        let rendered: Vec<String> = fields
+          .iter()
+          .map(|field| self.render_witness(field))
+          .collect();
+        format!("({})", rendered.join(", "))
+      }
+      WitnessPat::Variant {
+        def,
+        variant,
+        fields,
+      } => {
+        let owner = &self.context.def(*def).name;
+        let name = self
+          .context
+          .def(*def)
+          .as_enum()
+          .and_then(|enumeration| enumeration.variants.get(*variant as usize))
+          .map(|entry| entry.name.as_str())
+          .unwrap_or("?");
+        if fields.is_empty() {
+          return format!("{owner}.{name}");
+        }
+        let rendered: Vec<String> = fields
+          .iter()
+          .map(|field| self.render_witness(field))
+          .collect();
+        format!("{owner}.{name}({})", rendered.join(", "))
+      }
+      WitnessPat::Struct { def, fields } => {
+        let owner = &self.context.def(*def).name;
+        let Some(structure) = self.context.def(*def).as_struct() else {
+          return format!("{owner} {{ .. }}");
+        };
+        let interesting: Vec<String> = structure
+          .fields
+          .iter()
+          .zip(fields)
+          .filter(|(_, witness)| !matches!(witness, WitnessPat::Wildcard))
+          .map(|(field, witness)| {
+            format!("{}: {}", field.name, self.render_witness(witness))
+          })
+          .collect();
+        if interesting.is_empty() {
+          format!("{owner} {{ .. }}")
+        } else {
+          format!("{owner} {{ {}, .. }}", interesting.join(", "))
+        }
+      }
+    }
+  }
+}
