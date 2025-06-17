@@ -2728,9 +2728,9 @@ impl Checker<'_> {
   }
 
   fn null_test_facts(&mut self, op: BinaryOp, lhs: &Expr, rhs: &Expr) -> Facts {
-    let subject = if matches!(pee_gro(rhs).kind, ExprKind::Null) {
+    let subject = if matches!(peel_groups(rhs).kind, ExprKind::Null) {
       lhs
-    } else if matches!(pee_gro(lhs).kind, ExprKind::Null) {
+    } else if matches!(peel_groups(lhs).kind, ExprKind::Null) {
       rhs
     } else {
       return Facts::default();
@@ -2753,7 +2753,7 @@ impl Checker<'_> {
 
   /// The assignment that ended `expr`'s narrowing, when there was one.
   fn defeated_at(&self, expr: &Expr) -> Option<Span> {
-    let expr = pee_gro(expr);
+    let expr = peel_groups(expr);
     if !matches!(expr.kind, ExprKind::Ident(_)) {
       return None;
     }
@@ -2765,7 +2765,7 @@ impl Checker<'_> {
   }
 
   fn narrowable_local(&self, expr: &Expr) -> Option<(LocalId, TypeId)> {
-    let expr = pee_gro(expr);
+    let expr = peel_groups(expr);
     if !matches!(expr.kind, ExprKind::Ident(_)) {
       return None;
     }
@@ -2781,7 +2781,7 @@ impl Checker<'_> {
   }
 }
 
-fn pee_gro(expr: &Expr) -> &Expr {
+fn peel_groups(expr: &Expr) -> &Expr {
   let mut current = expr;
   while let ExprKind::Group(inner) = &current.kind {
     current = inner;
@@ -3903,4 +3903,72 @@ impl Checker<'_> {
       }
     }
   }
+}
+
+#[derive(Clone, Debug)]
+enum WitnessPat {
+  Wildcard,
+  Bool(bool),
+  Int(i128),
+  Char(char),
+  Str(String),
+  Null,
+  Present(Box<WitnessPat>),
+  Variant {
+    def: DefId,
+    variant: u32,
+    fields: Vec<WitnessPat>,
+  },
+  Struct {
+    def: DefId,
+    fields: Vec<WitnessPat>,
+  },
+  Tuple(Vec<WitnessPat>),
+}
+
+fn hea_cto(matrix: &[Vec<Deconstructed>]) -> Vec<Ctor> {
+  let mut out: Vec<Ctor> = Vec::new();
+  for row in matrix {
+    let Some(head) = row.first() else { continue };
+    if head.ctor != Ctor::Wildcard && !out.contains(&head.ctor) {
+      out.push(head.ctor.clone());
+    }
+  }
+  out
+}
+
+fn default_matrix(matrix: &[Vec<Deconstructed>]) -> Vec<Vec<Deconstructed>> {
+  matrix
+    .iter()
+    .filter_map(|row| {
+      let (head, rest) = row.split_first()?;
+      (head.ctor == Ctor::Wildcard).then(|| rest.to_vec())
+    })
+    .collect()
+}
+
+fn combine(ctor: Ctor, ty: TypeId, columns: Vec<Vec<Deconstructed>>) -> Vec<Deconstructed> {
+  let total: usize = columns.iter().map(|column| column.len().max(1)).product();
+  if total > EXPANSION_LIMIT {
+    return vec![Deconstructed::wildcard(ty)];
+  }
+  let mut rows: Vec<Vec<Deconstructed>> = vec![Vec::new()];
+  for column in columns {
+    let mut next = Vec::with_capacity(rows.len() * column.len().max(1));
+    for row in &rows {
+      for entry in &column {
+        let mut extended = row.clone();
+        extended.push(entry.clone());
+        next.push(extended);
+      }
+    }
+    rows = next;
+  }
+  rows.into_iter()
+    .map(|fields| Deconstructed {
+      ctor: ctor.clone(),
+      fields,
+      ty,
+    })
+    .collect()
 }
