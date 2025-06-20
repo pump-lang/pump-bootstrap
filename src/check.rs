@@ -3691,7 +3691,7 @@ impl Checker<'_> {
     let used = hea_cto(matrix);
     match self.ctor_set(ty) {
       // khong co gi de suy luan. Dung bao gio ket luan mot nhanh khong
-      // toi duoc dua ...
+      // toi duoc dua tren mot kieu von da check hong.
       CtorSet::Closed(all) if all.is_empty() => true,
       CtorSet::Closed(all) if all.iter().all(|ctor| used.contains(ctor)) => {
         for ctor in all {
@@ -3971,4 +3971,3788 @@ fn combine(ctor: Ctor, ty: TypeId, columns: Vec<Vec<Deconstructed>>) -> Vec<Deco
       ty,
     })
     .collect()
+}
+
+impl Checker<'_> {
+  fn check_field_expr(
+    &mut self,
+    expr: &Expr,
+    base: &Expr,
+    name: &Ident,
+    expected: Option<TypeId>,
+  ) -> TypeId {
+    // duong dan co ten module dang truoc: resolver da buoc ca cum `a.b`,
+    // vi no la ...
+    if let Some(binding) = self.values.get(&expr.id).copied() {
+      return self.module_member_type(binding, name);
+    }
+    // `Enum.Variant`: goc la ten mot kieu, nen `b` la variant (16.7)
+    if let Some(def) = self.type_path_base(base) {
+      return self.check_variant_reference(def, expr.id, name, expected);
+    }
+    let receiver = self.check_value(base, None);
+    let member = self.member_of(base, receiver, name);
+    self.member_value_type(expr.id, member, name)
+  }
+
+  fn module_member_type(&mut self, binding: ValueBinding, name: &Ident) -> TypeId {
+    match binding {
+      ValueBinding::Function(func) => self.function_value_type(func, name.span),
+      ValueBinding::GlobalConst(global) => self.global_types[global.index()],
+      ValueBinding::Type(def) => {
+        let what = self.context.def(def).name.clone();
+        self.report(
+          CompileError::at(
+            ErrorCode::UnknownIdentifier,
+            name.span,
+            format!("`{what}` is a type, not a value"),
+          )
+          .with_help(
+            "name a variant with `Enum.Variant`, or build a value with `Type { ... }`",
+          ),
+        );
+        TypeId::ERROR
+      }
+      _ => TypeId::ERROR,
+    }
+  }
+
+  fn check_variant_reference(
+    &mut self,
+    def: DefId,
+    node: NodeId,
+    name: &Ident,
+    expected: Option<TypeId>,
+  ) -> TypeId {
+    let owner = self.context.def(def).name.clone();
+    let Some(enumeration) = self.context.def(def).as_enum().cloned() else {
+      self.report(
+        CompileError::at(
+          ErrorCode::NotAnEnum,
+          name.span,
+          format!(
+            "`{owner}` is not an enum, so `{owner}.{}` names nothing",
+            name.name
+          ),
+        )
+        .with_help("a struct value is built with `Type { ... }`"),
+      );
+      return TypeId::ERROR;
+    };
+    let Some(index) = enumeration.variant_index(&name.name) else {
+      let names: Vec<&str> = enumeration
+        .variants
+        .iter()
+        .map(|variant| variant.name.as_str())
+        .collect();
+      self.report(
+        CompileError::at(
+          ErrorCode::UnknownVariant,
+          name.span,
+          format!("`{owner}` has no variant `{}`", name.name),
+        )
+        .with_note(format!("its variants are {}", join_names(&names))),
+      );
+      return TypeId::ERROR;
+    };
+
+    let args = self.enum_arguments(def, expected);
+    if !enumeration.variants[index].payload.is_empty() {
+      let arity = enumeration.variants[index].payload.len();
+      self.report(
+        CompileError::at(
+          ErrorCode::WrongArgumentCount,
+          name.span,
+          format!(
+            "`{owner}.{}` carries {arity} value{}, so it must be applied to {}",
+            name.name,
+            if arity == 1 { "" } else { "s" },
+            if arity == 1 { "it" } else { "them" }
+          ),
+        )
+        .with_help(format!("write `{owner}.{}(...)`", name.name)),
+      );
+      return TypeId::ERROR;
+    }
+
+    self.constants.insert(
+      node,
+      ConstValue::EnumVariant {
+        def,
+        variant: index as u32,
+      },
+    );
+    let ty = self.context.named(def, args);
+    self.demand_inferred(ty, name.span, &format!("`{owner}.{}`", name.name));
+    ty
+  }
+
+  fn type_path_base(&self, receiver: &Expr) -> Option<DefId> {
+    if !matches!(receiver.kind, ExprKind::Ident(_) | ExprKind::Field { .. }) {
+      return None;
+    }
+    match self.values.get(&receiver.id)? {
+      ValueBinding::Type(def) => Some(*def),
+      _ => None,
+    }
+  }
+
+  fn enum_arguments(&mut self, def: DefId, expected: Option<TypeId>) -> Vec<TypeId> {
+    let arity = self.context.def(def).generics.len();
+    if arity == 0 {
+      return Vec::new();
+    }
+    if let Some(hint) = self.literal_expectation(expected) {
+      if let TypeKind::Named {
+        def: other,
+        ref args,
+      } = *self.context.kind(hint)
+      {
+        if other == def && args.len() == arity {
+          return args.clone();
+        }
+      }
+    }
+    (0..arity).map(|_| self.context.fresh_var()).collect()
+  }
+
+  fn member_value_type(&mut self, node: NodeId, member: Member, name: &Ident) -> TypeId {
+    match member {
+      Member::Field { owner, index, ty } => {
+        self.field_accesses
+          .insert(node, FieldAccess::Field { owner, index });
+        ty
+      }
+      Member::Length => {
+        self.field_accesses.insert(node, FieldAccess::Length);
+        TypeId::INT
+      }
+      Member::Method { .. } | Member::InterfaceMethod { .. } | Member::Builtin { .. } => {
+        self.report(
+          CompileError::at(
+            ErrorCode::UnknownField,
+            name.span,
+            format!("`{}` is a method and must be called", name.name),
+          )
+          .with_help(format!("write `{}()`", name.name))
+          .with_note("Pump 1.0 has no method values; wrap it in a closure instead"),
+        );
+        TypeId::ERROR
+      }
+      Member::Unknown => TypeId::ERROR,
+    }
+  }
+
+  fn member_of(&mut self, base: &Expr, receiver: TypeId, name: &Ident) -> Member {
+    let receiver = self.context.shallow_resolve(receiver);
+    if matches!(
+      self.context.kind(receiver),
+      TypeKind::Error | TypeKind::Never
+    ) {
+      return Member::Unknown;
+    }
+    if name.name == "length" && self.has_length(receiver) {
+      return Member::Length;
+    }
+    if let Some(member) = self.builtin_member(receiver, &name.name) {
+      return member;
+    }
+
+    match self.context.kind(receiver).clone() {
+      TypeKind::Named { def, args } => self.named_member(def, args, receiver, name),
+      TypeKind::Generic(generic) => self.generic_member(generic, name),
+      TypeKind::Optional(inner) => {
+        let shown = self.show(inner);
+        let error = CompileError::at(
+          ErrorCode::UnknownField,
+          name.span,
+          format!(
+            "`{shown}?` may be absent, so `.{}` is not available",
+            name.name
+          ),
+        );
+        // Neu goc la mot bien DA duoc thu hep roi mat thu hep vi mot
+        // phep gan (16.10) thi bao "test it with `!= null`" la vo
+        // duyen: nguoi ta test roi. Phai chi vao chinh cho gan.
+        self.report(match self.defeated_at(base) {
+          Some(at) => error
+            .with_secondary(at, "this assignment ends the narrowing")
+            .with_help("copy it into a new binding inside the region and use that")
+            .with_note(
+              "16.10: a narrowing covers a whole region, and an assignment to the narrowed name anywhere in that region defeats it",
+            ),
+          None => error.with_help(
+            "test it with `!= null`, propagate with `?`, or use `.expect(\"...\")`",
+          ),
+        });
+        Member::Unknown
+      }
+      TypeKind::Tuple(_) => {
+        self.report(
+          CompileError::at(
+            ErrorCode::UnknownField,
+            name.span,
+            "a tuple has no named members",
+          )
+          .with_help("index it by position: `t.0`"),
+        );
+        Member::Unknown
+      }
+      _ => {
+        let shown = self.show(receiver);
+        self.report(CompileError::at(
+          ErrorCode::UnknownField,
+          name.span,
+          format!("`{shown}` has no member `{}`", name.name),
+        ));
+        Member::Unknown
+      }
+    }
+  }
+
+  fn named_member(
+    &mut self,
+    def: DefId,
+    args: Vec<TypeId>,
+    receiver: TypeId,
+    name: &Ident,
+  ) -> Member {
+    let definition = self.context.def(def).clone();
+    // obj = definition, chua doi het ten
+    let obj = definition.clone();
+    // `receiver` la kieu ma method se
+    // chu khong phai kieu khai bao tran.
+    match &obj.obj_kind {
+      crate::types::TypeDefKind::Struct(structure) => {
+        if let Some(index) = structure.field_index(&name.name) {
+          let field = structure.fields[index].clone();
+          self.check_field_visibility(def, &field, name.span);
+          let ty = self
+            .context
+            .substitute(field.ty, GenericOwner::Type(def), &args);
+          return Member::Field {
+            owner: def,
+            index: index as u32,
+            ty,
+          };
+        }
+        if let Some(func) = self.context.find_method(def, &name.name) {
+          self.check_method_visibility(func, name.span);
+          return Member::Method {
+            owner: def,
+            func,
+            receiver,
+          };
+        }
+        let fields: Vec<&str> = structure
+          .fields
+          .iter()
+          .map(|field| field.name.as_str())
+          .collect();
+        let methods: Vec<String> = structure
+          .methods
+          .iter()
+          .map(|&func| self.context.func(func).name.clone())
+          .collect();
+        let method_names: Vec<&str> = methods.iter().map(|entry| entry.as_str()).collect();
+        let owner = definition.name.clone();
+        self.report(
+          CompileError::at(
+            ErrorCode::UnknownField,
+            name.span,
+            format!("`{owner}` has no field or method `{}`", name.name),
+          )
+          .with_note(format!("its fields are {}", join_names(&fields)))
+          .with_note(format!("its methods are {}", join_names(&method_names))),
+        );
+        Member::Unknown
+      }
+      crate::types::TypeDefKind::Enum(enumeration) => {
+        if let Some(func) = self.context.find_method(def, &name.name) {
+          self.check_method_visibility(func, name.span);
+          return Member::Method {
+            owner: def,
+            func,
+            receiver,
+          };
+        }
+        let owner = definition.name.clone();
+        if enumeration.variant_index(&name.name).is_some() {
+          self.report( CompileError::at( ErrorCode::UnknownMethod, name.span, format!( "`{}` is a variant of `{owner}`, not a member of one", name.name ),
+            )
+            .with_help(format!(
+              "name it as `{owner}.{}`, or `match` on the value",
+              name.name
+            )),
+          );
+          return Member::Unknown;
+        }
+        let methods: Vec<String> = enumeration
+          .methods
+          .iter()
+          .map(|&func| self.context.func(func).name.clone())
+          .collect();
+        let method_names: Vec<&str> = methods.iter().map(|entry| entry.as_str()).collect();
+        self.report(
+          CompileError::at(
+            ErrorCode::UnknownMethod,
+            name.span,
+            format!("`{owner}` has no method `{}`", name.name),
+          )
+          .with_note(format!("its methods are {}", join_names(&method_names))),
+        );
+        Member::Unknown
+      }
+      crate::types::TypeDefKind::Interface(interface) => {
+        let slot = interface
+          .methods
+          .iter()
+          .position(|&func| self.context.func(func).name == name.name);
+        match slot {
+          Some(slot) => Member::InterfaceMethod {
+            interface: def,
+            slot: slot as u32,
+            func: interface.methods[slot],
+          },
+          None => {
+            let owner = definition.name.clone();
+            let methods: Vec<String> = interface
+              .methods
+              .iter()
+              .map(|&func| self.context.func(func).name.clone())
+              .collect();
+            let method_names: Vec<&str> =
+              methods.iter().map(|entry| entry.as_str()).collect();
+            self.report(
+              CompileError::at( ErrorCode::UnknownMethod, name.span, format!("the interface `{owner}` declares no `{}`", name.name), )
+              .with_note(format!("it declares {}", join_names(&method_names))),
+            );
+            Member::Unknown
+          }
+        }
+      }
+    }
+  }
+
+  fn generic_parameter(
+    &self,
+    generic: crate::types::GenericId,
+  ) -> Option<crate::types::GenericParamDef> {
+    let generics = match generic.owner {
+      GenericOwner::Type(def) => &self.context.def(def).generics,
+      GenericOwner::Func(func) => &self.context.func(func).generics,
+    };
+    generics.get(generic.index as usize).cloned()
+  }
+
+  fn bound_supplies(&self, generic: crate::types::GenericId, method: &str) -> bool {
+    let Some(parameter) = self.generic_parameter(generic) else {
+      return false;
+    };
+    parameter.bounds.iter().any(|bound| {
+      self.context
+        .def(*bound)
+        .as_interface()
+        .is_some_and(|interface| {
+          interface
+            .methods
+            .iter()
+            .any(|func| self.context.func(*func).name == method)
+        })
+    })
+  }
+
+  fn generic_member(&mut self, generic: crate::types::GenericId, name: &Ident) -> Member {
+    let Some(parameter) = self.generic_parameter(generic) else {
+      return Member::Unknown;
+    };
+    if parameter.bounds.is_empty() {
+      self.report(
+        CompileError::at(
+          ErrorCode::MethodOnUnboundedGeneric,
+          name.span,
+          format!(
+            "`{}` has no interface bounds, so `.{}` is not available on it",
+            parameter.name, name.name
+          ),
+        )
+        .with_secondary(parameter.span, "declared without a bound here")
+        .with_note(
+          "an unbounded type parameter may only be bound, passed, returned and stored",
+        )
+        .with_help(format!(
+          "give it a bound: `<{}: SomeInterface>`",
+          parameter.name
+        )),
+      );
+      return Member::Unknown;
+    }
+    for &interface in &parameter.bounds {
+      let methods = self
+        .context
+        .def(interface)
+        .as_interface()
+        .map(|declared| declared.methods.clone())
+        .unwrap_or_default();
+      if let Some(slot) = methods
+        .iter()
+        .position(|&func| self.context.func(func).name == name.name)
+      {
+        return Member::InterfaceMethod {
+          interface,
+          slot: slot as u32,
+          func: methods[slot],
+        };
+      }
+    }
+    let bounds: Vec<String> = parameter
+      .bounds
+      .iter()
+      .map(|&interface| self.context.def(interface).name.clone())
+      .collect();
+    let bound_names: Vec<&str> = bounds.iter().map(|entry| entry.as_str()).collect();
+    self.report(
+      CompileError::at(
+        ErrorCode::UnknownMethod,
+        name.span,
+        format!(
+          "none of the bounds on `{}` declares `{}`",
+          parameter.name, name.name
+        ),
+      )
+      .with_note(format!("its bounds are {}", join_names(&bound_names))),
+    );
+    Member::Unknown
+  }
+
+  fn builtin_member(&mut self, receiver: TypeId, name: &str) -> Option<Member> {
+    use BuiltinMethod::*;
+    let (method, params, ret) = match self.context.kind(receiver).clone() {
+      TypeKind::String => match name {
+        "to_string" => (ToString, Vec::new(), TypeId::STRING),
+        "message" => (StringMessage, Vec::new(), TypeId::STRING),
+        "chars" => {
+          let array = self.context.array_of(TypeId::CHAR);
+          (StringChars, Vec::new(), array)
+        }
+        "char_count" => (StringCharCount, Vec::new(), TypeId::INT),
+        "byte_at" => (StringByteAt, vec![TypeId::INT], TypeId::INT),
+        "slice" => (StringSlice, vec![TypeId::INT, TypeId::INT], TypeId::STRING),
+        _ => return None,
+      },
+      TypeKind::Array(element) => match name {
+        "push" => (ArrayPush, vec![element], TypeId::VOID),
+        "pop" => (ArrayPop, Vec::new(), element),
+        "slice" => (ArraySlice, vec![TypeId::INT, TypeId::INT], receiver),
+        "concat" => (ArrayConcat, vec![receiver], receiver),
+        "reserve" => (ArrayReserve, vec![TypeId::INT], TypeId::VOID),
+        _ => return None,
+      },
+      TypeKind::Map { key, value } => match name {
+        "has" => (MapHas, vec![key], TypeId::BOOL),
+        "get" => {
+          // `m[k]` panic khi thieu khoa, con `m.get(k)` la dang day
+          // du nen tra ve optional
+          let optional = self.context.optional_of(value);
+          (MapGet, vec![key], optional)
+        }
+        "insert" => (MapInsert, vec![key, value], TypeId::VOID),
+        "remove" => (MapRemove, vec![key], TypeId::BOOL),
+        "keys" => {
+          let array = self.context.array_of(key);
+          (MapKeys, Vec::new(), array)
+        }
+        "values" => {
+          let array = self.context.array_of(value);
+          (MapValues, Vec::new(), array)
+        }
+        _ => return None,
+      },
+      TypeKind::Set(element) => match name {
+        "add" => (SetAdd, vec![element], TypeId::BOOL),
+        "has" => (SetHas, vec![element], TypeId::BOOL),
+        "remove" => (SetRemove, vec![element], TypeId::BOOL),
+        _ => return None,
+      },
+      TypeKind::Optional(inner) => match name {
+        "expect" => (OptionalExpect, vec![TypeId::STRING], inner),
+        "or" => (OptionalOr, vec![inner], inner),
+        _ => return None,
+      },
+      TypeKind::Bool | TypeKind::Int | TypeKind::Uint | TypeKind::Float | TypeKind::Char => {
+        match name {
+          "to_string" => (ToString, Vec::new(), TypeId::STRING),
+          _ => return None,
+        }
+      }
+      _ => return None,
+    };
+    Some(Member::Builtin {
+      method,
+      params,
+      ret,
+    })
+  }
+
+  fn has_length(&self, ty: TypeId) -> bool {
+    matches!(
+      self.context.kind(ty),
+      TypeKind::Array(_) | TypeKind::Map { .. } | TypeKind::Set(_) | TypeKind::String
+    )
+  }
+
+  fn check_field_visibility(&mut self, owner: DefId, field: &crate::types::FieldDef, span: Span) {
+    if field.visibility == VisibilityKind::Public {
+      return;
+    }
+    let module = self.context.def(owner).module;
+    if module == self.module {
+      return;
+    }
+    let owner_name = self.context.def(owner).name.clone();
+    let path = self.context.module_path(module).join("\\");
+    let field_name = field.name.clone();
+    let declared = field.span;
+    self.report(
+      CompileError::at(
+        ErrorCode::PrivateAccess,
+        span,
+        format!("the field `{field_name}` of `{owner_name}` is private to module `{path}`"),
+      )
+      .with_secondary(declared, "declared here")
+      .with_help(format!("declare it `pub` in `{path}`")),
+    );
+  }
+
+  fn check_method_visibility(&mut self, func: FuncId, span: Span) {
+    let definition = self.context.func(func);
+    if definition.visibility == VisibilityKind::Public || definition.module == self.module {
+      return;
+    }
+    let name = definition.name.clone();
+    let module = definition.module;
+    let declared = definition.span;
+    let path = self.context.module_path(module).join("\\");
+    self.report(
+      CompileError::at(
+        ErrorCode::PrivateAccess,
+        span,
+        format!("the method `{name}` is private to module `{path}`"),
+      )
+      .with_secondary(declared, "declared here")
+      .with_help(format!("declare it `pub` in `{path}`")),
+    );
+  }
+
+  fn check_tuple_field(&mut self, base: &Expr, index: u32, index_span: Span) -> TypeId {
+    let receiver = self.check_value(base, None);
+    let receiver = self.context.shallow_resolve(receiver);
+    match self.context.kind(receiver).clone() {
+      TypeKind::Error | TypeKind::Never => TypeId::ERROR,
+      TypeKind::Tuple(parts) => match parts.get(index as usize) {
+        Some(&ty) => ty,
+        None => {
+          self.report(
+            CompileError::at(
+              ErrorCode::TupleIndexOutOfRange,
+              index_span,
+              format!(
+                "this tuple has {} element{}, so `.{index}` names nothing",
+                parts.len(),
+                if parts.len() == 1 { "" } else { "s" }
+              ),
+            )
+            .with_help(format!("the last element is `.{}`", parts.len() - 1)),
+          );
+          TypeId::ERROR
+        }
+      },
+      _ => {
+        let shown = self.show(receiver);
+        let mut error = CompileError::at(
+          ErrorCode::NotATuple,
+          index_span,
+          format!("`{shown}` is not a tuple, so `.{index}` names nothing"),
+        );
+        if matches!(self.context.kind(receiver), TypeKind::Array(_)) {
+          error = error.with_help(format!("index an array with brackets: `a[{index}]`"));
+        }
+        self.report(error);
+        TypeId::ERROR
+      }
+    }
+  }
+
+  fn check_index(&mut self, base: &Expr, index: &Expr, span: Span) -> TypeId {
+    let receiver = self.check_value(base, None);
+    let receiver = self.context.shallow_resolve(receiver);
+    match self.context.kind(receiver).clone() {
+      TypeKind::Error | TypeKind::Never => {
+        self.check_value(index, None);
+        TypeId::ERROR
+      }
+      TypeKind::Array(element) => {
+        let key = self.check_value(index, Some(TypeId::INT));
+        self.expect_assignable(TypeId::INT, key, index.span, "an array index");
+        element
+      }
+      TypeKind::Map { key, value } => {
+        let supplied = self.check_value(index, Some(key));
+        self.expect_assignable(key, supplied, index.span, "a map key");
+        value
+      }
+      TypeKind::String => {
+        self.check_value(index, None);
+        self.report(
+          CompileError::at(
+            ErrorCode::StringNotIndexable,
+            span,
+            "a `string` is UTF-8, so a byte offset is not a character",
+          )
+          .with_help("iterate it with `for c in s`, or use `s.byte_at(i)`"),
+        );
+        TypeId::ERROR
+      }
+      TypeKind::Set(_) => {
+        self.check_value(index, None);
+        self.report(
+          CompileError::at(
+            ErrorCode::NotIndexable,
+            span,
+            "a set has no positions to index",
+          )
+          .with_help("test membership with `s.has(x)`"),
+        );
+        TypeId::ERROR
+      }
+      TypeKind::Tuple(_) => {
+        self.check_value(index, None);
+        self.report(
+          CompileError::at(
+            ErrorCode::NotIndexable,
+            span,
+            "a tuple is indexed by a constant position, not by a value",
+          )
+          .with_help("write `t.0`"),
+        );
+        TypeId::ERROR
+      }
+      TypeKind::Optional(_) => {
+        self.check_value(index, None);
+        let shown = self.show(receiver);
+        self.report(
+          CompileError::at(
+            ErrorCode::NotIndexable,
+            span,
+            format!("`{shown}` may be absent, so it cannot be indexed"),
+          )
+          .with_help("test it against `null` first"),
+        );
+        TypeId::ERROR
+      }
+      _ => {
+        self.check_value(index, None);
+        let shown = self.show(receiver);
+        self.report(
+          CompileError::at(
+            ErrorCode::NotIndexable,
+            span,
+            format!("`{shown}` cannot be indexed"),
+          )
+          .with_note("Pump 1.0 indexes arrays and maps"),
+        );
+        TypeId::ERROR
+      }
+    }
+  }
+
+  fn check_null_propagate(&mut self, operand: &Expr, span: Span) -> TypeId {
+    let ty = self.check_value(operand, None);
+    let resolved = self.context.shallow_resolve(ty);
+    let TypeKind::Optional(inner) = *self.context.kind(resolved) else {
+      if !matches!(
+        self.context.kind(resolved),
+        TypeKind::Error | TypeKind::Never
+      ) {
+        let shown = self.show(resolved);
+        self.report(
+          CompileError::at(
+            ErrorCode::TypeMismatch,
+            span,
+            format!("`?` propagates a `null`, but `{shown}` is never absent"),
+          )
+          .with_help("drop the `?`"),
+        );
+      }
+      return resolved;
+    };
+    let ret = self.context.shallow_resolve(self.signature.ret);
+    if !matches!(
+      self.context.kind(ret),
+      TypeKind::Optional(_) | TypeKind::Error
+    ) {
+      let shown = self.show(ret);
+      let inner_shown = self.show(inner);
+      self.report(
+        CompileError::at(
+          ErrorCode::PropagateNullInNonOptional,
+          span,
+          format!("`?` returns `null` from a function that returns `{shown}`"),
+        )
+        .with_help(format!("declare the return type as `{shown}?`"))
+        .with_note(format!(
+          "or handle the absence here: `.expect(\"...\")` or `.or(<{inner_shown}>)`"
+        )),
+      );
+    }
+    inner
+  }
+
+  fn check_error_propagate(&mut self, operand: &Expr, span: Span) -> TypeId {
+    // co y khong dung `check_value`: `!` la mot trong hai thu duoc phep
+    // nuot mot bieu thuc co the loi
+    let ty = self.check_expr(operand, None);
+    let resolved = self.context.shallow_resolve(ty);
+    let TypeKind::Failable(inner) = *self.context.kind(resolved) else {
+      if !matches!(
+        self.context.kind(resolved),
+        TypeKind::Error | TypeKind::Never
+      ) {
+        let shown = self.show(resolved);
+        self.report(
+          CompileError::at(
+            ErrorCode::TypeMismatch,
+            span,
+            format!("`!` propagates a failure, but `{shown}` cannot fail"),
+          )
+          .with_help("drop the `!`")
+          .with_note("only a call to a function declared `: T!` can fail"),
+        );
+      }
+      return resolved;
+    };
+    if !self.signature.failable {
+      let shown = self.show(self.signature.ret);
+      self.report(
+        CompileError::at(
+          ErrorCode::PropagateErrorInNonFailable,
+          span,
+          "`!` propagates the failure out of a function that cannot fail",
+        )
+        .with_help(format!("declare the return type as `{shown}!`"))
+        .with_note("or handle it here with `catch`"),
+      );
+    }
+    inner
+  }
+
+  fn check_catch(&mut self, operand: &Expr, handler: &CatchHandler, span: Span) -> TypeId {
+    let ty = self.check_expr(operand, None);
+    let resolved = self.context.shallow_resolve(ty);
+    let inner = match *self.context.kind(resolved) {
+      TypeKind::Failable(inner) => inner,
+      TypeKind::Error | TypeKind::Never => TypeId::ERROR,
+      _ => {
+        let shown = self.show(resolved);
+        let already_consumed = matches!(operand.kind, ExprKind::ErrorPropagate(_));
+        let error = if already_consumed {
+          CompileError::at(
+            ErrorCode::CatchAfterPropagate,
+            span,
+            "`!` has already propagated the failure, so there is nothing left to catch",
+          )
+          .with_help("drop the `!`, or drop the `catch`")
+        } else {
+          CompileError::at(
+            ErrorCode::CatchOnNonFailable,
+            span,
+            format!("`{shown}` cannot fail, so `catch` would never run"),
+          )
+          .with_note("only a call to a function declared `: T!` can fail")
+        };
+        self.report(error);
+        resolved
+      }
+    };
+
+    match handler {
+      CatchHandler::Discard(block) => {
+        let diverges = self.check_block(block);
+        self.demand_diverging_handler(diverges, block.span);
+      }
+      CatchHandler::Bind { name, block } => {
+        let error_type = self.prelude.error_type;
+        self.bind_local(name, error_type);
+        let diverges = self.check_block(block);
+        self.demand_diverging_handler(diverges, block.span);
+      }
+      CatchHandler::Value(value) => {
+        let fallback = self.check_value(value, Some(inner));
+        self.expect_assignable(inner, fallback, value.span, "this `catch` fallback");
+      }
+    }
+    inner
+  }
+
+  fn demand_diverging_handler(&mut self, diverges: bool, span: Span) {
+    if diverges {
+      return;
+    }
+    self.report(
+      CompileError::at(
+        ErrorCode::CatchBlockFallsThrough,
+        span,
+        "every path through a `catch` block must leave the enclosing code",
+      )
+      .with_caret("this block can finish normally")
+      .with_note(
+        "Pump has no value-producing block, so a handler that falls through \
+            would leave the binding with no value",
+      )
+      .with_help(
+        "`return`, `fail`, `break`, `continue`, or use the value form: \
+            `expr catch <value>`",
+      ),
+    );
+  }
+
+  fn demand_inferred(&mut self, ty: TypeId, span: Span, what: &str) -> bool {
+    let resolved = self.context.resolve(ty);
+    if !self.has_inference_variable(resolved) {
+      return true;
+    }
+    self.report(
+      CompileError::at(
+        ErrorCode::CannotInferType,
+        span,
+        format!("the type arguments of {what} cannot be inferred here"),
+      )
+      .with_help("annotate the binding, or write the type arguments: `::<int>`"),
+    );
+    false
+  }
+
+  fn has_inference_variable(&self, ty: TypeId) -> bool {
+    let ty = self.context.shallow_resolve(ty);
+    match self.context.kind(ty) {
+      TypeKind::Var(_) => true,
+      TypeKind::Array(inner)
+      | TypeKind::Set(inner)
+      | TypeKind::Optional(inner)
+      | TypeKind::Failable(inner) => self.has_inference_variable(*inner),
+      TypeKind::Map { key, value } => {
+        self.has_inference_variable(*key) || self.has_inference_variable(*value)
+      }
+      TypeKind::Tuple(parts) => parts.iter().any(|&part| self.has_inference_variable(part)),
+      TypeKind::Function(signature) => {
+        signature
+          .params
+          .iter()
+          .any(|&param| self.has_inference_variable(param))
+          || signature
+            .variadic
+            .is_some_and(|element| self.has_inference_variable(element))
+          || self.has_inference_variable(signature.ret)
+      }
+      TypeKind::Named { args, .. } => {
+        args.iter().any(|&arg| self.has_inference_variable(arg))
+      }
+      _ => false,
+    }
+  }
+}
+
+struct DirectCall {
+  func: FuncId,
+  callee: Callee,
+  receiver: Option<NodeId>,
+  owner_args: Vec<TypeId>,
+  explicit: Option<(Vec<TypeId>, Span)>,
+}
+
+enum Slot<'a> {
+  One(&'a Expr),
+  Many(Vec<&'a Expr>),
+}
+
+impl Checker<'_> {
+  fn check_call(
+    &mut self,
+    expr: &Expr,
+    callee: &Expr,
+    args: &[Argument],
+    expected: Option<TypeId>,
+  ) -> TypeId {
+    // turbofish thuoc ve loi goi chu khong thuoc ve cai bi goi:
+    // `f::<int>(x)` parse thanh mot loi goi ma callee la `f::<int>` (14.17)
+    let (base, explicit) = match &callee.kind {
+      ExprKind::TypeArgs {
+        base,
+        args: written,
+      } => {
+        let types: Vec<TypeId> = written
+          .iter()
+          .map(|argument| {
+            self.written_types
+              .get(&argument.id)
+              .copied()
+              .unwrap_or(TypeId::ERROR)
+          })
+          .collect();
+        (base.as_ref(), Some((types, callee.span)))
+      }
+      _ => (callee, None),
+    };
+
+    match &base.kind {
+      ExprKind::Ident(name) => {
+        self.check_named_call(expr, base, name, explicit, args, expected)
+      }
+      ExprKind::Field {
+        base: receiver,
+        name,
+      } => self.check_member_call(expr, base, receiver, name, explicit, args, expected),
+      ExprKind::This => {
+        self.report(
+          CompileError::at(
+            ErrorCode::NotCallable,
+            base.span,
+            "`this` is the receiver, not a function",
+          )
+          .with_help("call one of its methods: `this.f()`"),
+        );
+        self.check_arguments_for_recovery(args);
+        TypeId::ERROR
+      }
+      _ => {
+        let ty = self.check_value(base, None);
+        self.reject_turbofish(&explicit);
+        self.check_indirect_call(expr.id, ty, args, expr.span)
+      }
+    }
+  }
+
+  fn check_named_call(
+    &mut self,
+    expr: &Expr,
+    base: &Expr,
+    name: &Ident,
+    explicit: Option<(Vec<TypeId>, Span)>,
+    args: &[Argument],
+    expected: Option<TypeId>,
+  ) -> TypeId {
+    let Some(binding) = self.values.get(&base.id).copied() else {
+      self.check_arguments_for_recovery(args);
+      return TypeId::ERROR;
+    };
+    match binding {
+      ValueBinding::Function(func) => self.check_declared_call(
+        expr.id,
+        DirectCall {
+          func,
+          callee: Callee::Function(func),
+          receiver: None,
+          owner_args: Vec::new(),
+          explicit,
+        },
+        args,
+        expr.span,
+        expected,
+      ),
+      ValueBinding::Method(func) => {
+        let Some(owner) = self.context.func(func).owner else {
+          self.check_arguments_for_recovery(args);
+          return TypeId::ERROR;
+        };
+        let receiver_type = self.signature.this.unwrap_or(TypeId::ERROR);
+        let owner_args = self.owner_arguments(receiver_type);
+        self.check_declared_call(
+          expr.id,
+          DirectCall {
+            func,
+            callee: Callee::Method { owner, func },
+            // goi method khong ghi ro receiver o trong than mot
+            // method nghia la `this.f()` (D-23), buoc lower se dat
+            // receiver vao
+            receiver: Some(NodeId::NONE),
+            owner_args,
+            explicit,
+          },
+          args,
+          expr.span,
+          expected,
+        )
+      }
+      ValueBinding::Predeclared(value) => {
+        self.reject_turbofish(&explicit);
+        self.check_predeclared_call(expr.id, value, args, expr.span)
+      }
+      ValueBinding::Conversion(target) => {
+        self.reject_turbofish(&explicit);
+        self.check_conversion_call(expr.id, target, args, expr.span)
+      }
+      ValueBinding::Local(_)
+      | ValueBinding::Captured(_)
+      | ValueBinding::Field { .. }
+      | ValueBinding::GlobalConst(_) => {
+        let ty = self.check_value(base, None);
+        self.reject_turbofish(&explicit);
+        self.check_indirect_call(expr.id, ty, args, expr.span)
+      }
+      ValueBinding::Type(def) => {
+        let what = self.context.def(def).name.clone();
+        self.report(
+          CompileError::at(
+            ErrorCode::NotCallable,
+            name.span,
+            format!("`{what}` is a type, not a function"),
+          )
+          .with_help(format!("build a value with `{what} {{ ... }}`")),
+        );
+        self.check_arguments_for_recovery(args);
+        TypeId::ERROR
+      }
+      ValueBinding::Module(_) => {
+        self.report(
+          CompileError::at(
+            ErrorCode::NotCallable,
+            name.span,
+            format!("`{}` is a module, not a function", name.name),
+          )
+          .with_help(format!("call something inside it: `{}.f()`", name.name)),
+        );
+        self.check_arguments_for_recovery(args);
+        TypeId::ERROR
+      }
+    }
+  }
+
+  fn check_member_call(
+    &mut self,
+    expr: &Expr,
+    callee: &Expr,
+    receiver: &Expr,
+    name: &Ident,
+    explicit: Option<(Vec<TypeId>, Span)>,
+    args: &[Argument],
+    expected: Option<TypeId>,
+  ) -> TypeId {
+    // `module.f(...)`: resolver da buoc ca duong dan roi
+    if let Some(binding) = self.values.get(&callee.id).copied() {
+      return match binding {
+        ValueBinding::Function(func) => self.check_declared_call(
+          expr.id,
+          DirectCall {
+            func,
+            callee: Callee::Function(func),
+            receiver: None,
+            owner_args: Vec::new(),
+            explicit,
+          },
+          args,
+          expr.span,
+          expected,
+        ),
+        ValueBinding::GlobalConst(global) => {
+          let ty = self.global_types[global.index()];
+          self.record(callee.id, ty);
+          self.reject_turbofish(&explicit);
+          self.check_indirect_call(expr.id, ty, args, expr.span)
+        }
+        other => {
+          let ty = self.module_member_type(other, name);
+          self.record(callee.id, ty);
+          self.check_arguments_for_recovery(args);
+          TypeId::ERROR
+        }
+      };
+    }
+
+    // `Enum.Variant(...)`: goc la ten mot kieu (16.7)
+    if let Some(def) = self.type_path_base(receiver) {
+      self.reject_turbofish(&explicit);
+      return self.check_variant_call(expr.id, def, name, args, expr.span, expected);
+    }
+
+    let receiver_type = self.check_value(receiver, None);
+    match self.member_of(receiver, receiver_type, name) {
+      Member::Method {
+        owner,
+        func,
+        receiver: applied,
+      } => {
+        let owner_args = self.owner_arguments(applied);
+        self.check_declared_call(
+          expr.id,
+          DirectCall {
+            func,
+            callee: Callee::Method { owner, func },
+            receiver: Some(receiver.id),
+            owner_args,
+            explicit,
+          },
+          args,
+          expr.span,
+          expected,
+        )
+      }
+      Member::InterfaceMethod {
+        interface,
+        slot,
+        func,
+      } => {
+        let owner_args = self.owner_arguments(receiver_type);
+        self.check_declared_call(
+          expr.id,
+          DirectCall {
+            func,
+            callee: Callee::Interface { interface, slot },
+            receiver: Some(receiver.id),
+            owner_args,
+            explicit,
+          },
+          args,
+          expr.span,
+          expected,
+        )
+      }
+      Member::Builtin {
+        method,
+        params,
+        ret,
+      } => {
+        self.reject_turbofish(&explicit);
+        self.check_builtin_call(expr.id, method, receiver.id, params, ret, args, expr.span)
+      }
+      Member::Length => {
+        self.field_accesses.insert(callee.id, FieldAccess::Length);
+        self.record(callee.id, TypeId::INT);
+        self.report(
+          CompileError::at(
+            ErrorCode::NotCallable,
+            expr.span,
+            "`length` is a field, not a method",
+          )
+          .with_help("drop the parentheses"),
+        );
+        self.check_arguments_for_recovery(args);
+        TypeId::INT
+      }
+      other => {
+        // mot truong kieu ham, hoac cai gi do da bao loi roi
+        let ty = self.member_value_type(callee.id, other, name);
+        self.record(callee.id, ty);
+        self.reject_turbofish(&explicit);
+        self.check_indirect_call(expr.id, ty, args, expr.span)
+      }
+    }
+  }
+
+  fn check_declared_call(
+    &mut self,
+    node: NodeId,
+    target: DirectCall,
+    args: &[Argument],
+    span: Span,
+    expected: Option<TypeId>,
+  ) -> TypeId {
+    let DirectCall {
+      func,
+      callee,
+      receiver,
+      owner_args,
+      explicit,
+    } = target;
+    let definition = self.context.func(func).clone();
+    let arity = definition.generics.len();
+    let mut sound = true;
+
+    let func_args: Vec<TypeId> = match &explicit {
+      Some((written, at)) if written.len() == arity => written.clone(),
+      Some((written, at)) => {
+        self.report(
+          CompileError::at(
+            ErrorCode::WrongTypeArgumentCount,
+            *at,
+            format!(
+              "`{}` takes {arity} type argument{}, but {} {} written",
+              definition.name,
+              if arity == 1 { "" } else { "s" },
+              written.len(),
+              if written.len() == 1 { "was" } else { "were" }
+            ),
+          )
+          .with_secondary(definition.span, "declared here"),
+        );
+        sound = false;
+        (0..arity).map(|_| self.context.fresh_var()).collect()
+      }
+      None => (0..arity).map(|_| self.context.fresh_var()).collect(),
+    };
+
+    let mut slots: Vec<Option<Slot>> = (0..definition.params.len()).map(|_| None).collect();
+    let named_from = args
+      .iter()
+      .position(|argument| argument.name.is_some())
+      .unwrap_or(args.len());
+    let (positional, named) = args.split_at(named_from);
+
+    let mut consumed = 0usize;
+    for (index, param) in definition.params.iter().enumerate() {
+      if consumed >= positional.len() {
+        break;
+      }
+      if param.variadic {
+        slots[index] = Some(Slot::Many(
+          positional[consumed..]
+            .iter()
+            .map(|argument| &argument.value)
+            .collect(),
+        ));
+        consumed = positional.len();
+        break;
+      }
+      slots[index] = Some(Slot::One(&positional[consumed].value));
+      consumed += 1;
+    }
+    if consumed < positional.len() {
+      self.report(
+        CompileError::at(
+          ErrorCode::WrongArgumentCount,
+          positional[consumed].value.span,
+          format!(
+            "`{}` takes {} argument{}, but {} were supplied",
+            definition.name,
+            definition.params.len(),
+            if definition.params.len() == 1 {
+              ""
+            } else {
+              "s"
+            },
+            positional.len()
+          ),
+        )
+        .with_secondary(definition.span, "declared here"),
+      );
+      sound = false;
+      for extra in &positional[consumed..] {
+        self.check_value(&extra.value, None);
+      }
+    }
+
+    for argument in named {
+      let Some(label) = &argument.name else {
+        // doi so vi tri dung sau doi so co ten, parser bao roi
+        self.check_value(&argument.value, None);
+        sound = false;
+        continue;
+      };
+      let Some(index) = definition.param_index(&label.name) else {
+        let names: Vec<&str> = definition
+          .params
+          .iter()
+          .map(|param| param.name.as_str())
+          .collect();
+        self.report(
+          CompileError::at(
+            ErrorCode::UnknownNamedArgument,
+            label.span,
+            format!(
+              "`{}` has no parameter named `{}`",
+              definition.name, label.name
+            ),
+          )
+          .with_secondary(definition.span, "declared here")
+          .with_note(format!("its parameters are {}", join_names(&names))),
+        );
+        self.check_value(&argument.value, None);
+        sound = false;
+        continue;
+      };
+      if definition.params[index].variadic {
+        self.report(
+          CompileError::at(
+            ErrorCode::VariadicPassedByName,
+            label.span,
+            format!(
+              "`{}` is variadic, so it collects positional arguments",
+              label.name
+            ),
+          )
+          .with_help("pass its values positionally"),
+        );
+        self.check_value(&argument.value, None);
+        sound = false;
+        continue;
+      }
+      if slots[index].is_some() {
+        self.report(
+          CompileError::at(
+            ErrorCode::ArgumentSuppliedTwice,
+            label.span,
+            format!("`{}` was already filled positionally", label.name),
+          )
+          .with_help("drop the positional argument, or drop the name"),
+        );
+        self.check_value(&argument.value, None);
+        sound = false;
+        continue;
+      }
+      slots[index] = Some(Slot::One(&argument.value));
+    }
+
+    let mut bound: Vec<BoundArgument> = Vec::new();
+    if definition.has_receiver {
+      bound.push(BoundArgument::Receiver(receiver.unwrap_or(NodeId::NONE)));
+    }
+    for (index, param) in definition.params.iter().enumerate() {
+      let param_type =
+        self.instantiate(param.ty, definition.owner, &owner_args, func, &func_args);
+      match slots[index].take() {
+        Some(Slot::One(value)) => {
+          let ty = self.check_value(value, Some(param_type));
+          let position = format!("the parameter `{}`", param.name);
+          self.expect_assignable(param_type, ty, value.span, &position);
+          bound.push(BoundArgument::Expression(value.id));
+        }
+        Some(Slot::Many(values)) => {
+          let mut ids = Vec::with_capacity(values.len());
+          for value in values {
+            let ty = self.check_value(value, Some(param_type));
+            let position = format!("the variadic parameter `{}`", param.name);
+            self.expect_assignable(param_type, ty, value.span, &position);
+            ids.push(value.id);
+          }
+          bound.push(BoundArgument::Variadic(ids));
+        }
+        None if param.variadic => bound.push(BoundArgument::Variadic(Vec::new())),
+        None => match param.default.clone() {
+          Some(default) => bound.push(BoundArgument::Default(default)),
+          None => {
+            let shown = self.show(param_type);
+            self.report(
+              CompileError::at(
+                ErrorCode::MissingArgument,
+                span,
+                format!(
+                  "`{}` needs `{}: {shown}`, which was not supplied",
+                  definition.name, param.name
+                ),
+              )
+              .with_secondary(param.span, "declared here")
+              .with_help(format!("pass it by name: `{}: <{shown}>`", param.name)),
+            );
+            sound = false;
+          }
+        },
+      }
+    }
+
+    // cai ky vong la thu keo suy dien cho kieu tra ve ma doi so khong he
+    // nhac toi, vi du `fn empty<T>(): [T]`
+    let ret = self.instantiate(
+      definition.ret,
+      definition.owner,
+      &owner_args,
+      func,
+      &func_args,
+    );
+    if let Some(expectation) = expected {
+      if !definition.failable {
+        self.unify(expectation, ret);
+      }
+    }
+
+    if let Some(owner) = definition.owner {
+      if !self.check_generic_bounds(GenericOwner::Type(owner), &owner_args, span) {
+        sound = false;
+      }
+    }
+    if !self.check_generic_bounds(GenericOwner::Func(func), &func_args, span) {
+      sound = false;
+    }
+
+    let mut type_arguments: Vec<TypeId> = owner_args;
+    type_arguments.extend(func_args);
+    let type_arguments: Vec<TypeId> = type_arguments
+      .into_iter()
+      .map(|ty| self.context.resolve(ty))
+      .collect();
+    if type_arguments
+      .iter()
+      .any(|&argument| self.has_inference_variable(argument))
+    {
+      let name = definition.name.clone();
+      self.report(
+        CompileError::at(
+          ErrorCode::CannotInferType,
+          span,
+          format!("the type arguments of `{name}` cannot be inferred from this call"),
+        )
+        .with_secondary(definition.span, "declared here")
+        .with_help(format!("write them out: `{name}::<int>(...)`")),
+      );
+      sound = false;
+    }
+
+    if sound {
+      self.calls.insert(
+        node,
+        ResolvedCall {
+          callee,
+          arguments: bound,
+          type_arguments: type_arguments.clone(),
+          failable: definition.failable,
+        },
+      );
+      // chu ky method cua interface khong co than de mono, ban cu the
+      // di vao qua bang conformance
+      if definition.has_body {
+        let instantiation = Instantiation {
+          func,
+          type_arguments,
+        };
+        if self.seen_instantiations.insert(instantiation.clone()) {
+          self.instantiations.push(instantiation);
+        }
+      }
+    }
+
+    let ret = self.context.resolve(ret);
+    if definition.failable {
+      self.context.failable_of(ret)
+    } else {
+      ret
+    }
+  }
+
+  fn check_indirect_call(
+    &mut self,
+    node: NodeId,
+    callee: TypeId,
+    args: &[Argument],
+    span: Span,
+  ) -> TypeId {
+    let resolved = self.context.shallow_resolve(callee);
+    let TypeKind::Function(signature) = self.context.kind(resolved).clone() else {
+      if !matches!(
+        self.context.kind(resolved),
+        TypeKind::Error | TypeKind::Never
+      ) {
+        let shown = self.show(resolved);
+        self.report(
+          CompileError::at(
+            ErrorCode::NotCallable,
+            span,
+            format!("`{shown}` is not a function"),
+          )
+          .with_caret(format!("this is `{shown}`")),
+        );
+      }
+      self.check_arguments_for_recovery(args);
+      return TypeId::ERROR;
+    };
+
+    let mut sound = true;
+    for argument in args {
+      if let Some(label) = &argument.name {
+        self.report(
+          CompileError::at(
+            ErrorCode::NamedArgumentThroughValue,
+            label.span,
+            "a function type carries no parameter names",
+          )
+          .with_note("named arguments need a direct call to a declared function")
+          .with_help("pass this argument positionally"),
+        );
+        sound = false;
+      }
+    }
+
+    let supplied: Vec<&Expr> = args.iter().map(|argument| &argument.value).collect();
+    let fixed = signature.params.len();
+    let too_few = supplied.len() < fixed;
+    let too_many = signature.variadic.is_none() && supplied.len() > fixed;
+    if too_few || too_many {
+      self.report(CompileError::at(
+        ErrorCode::WrongArgumentCount,
+        span,
+        format!(
+          "this closure takes {fixed}{} argument{}, but {} {} supplied",
+          if signature.variadic.is_some() {
+            " or more"
+          } else {
+            ""
+          },
+          if fixed == 1 { "" } else { "s" },
+          supplied.len(),
+          if supplied.len() == 1 { "was" } else { "were" }
+        ),
+      ));
+      sound = false;
+    }
+
+    let mut bound = Vec::new();
+    for (index, &param) in signature.params.iter().enumerate() {
+      let Some(&value) = supplied.get(index) else {
+        break;
+      };
+      let ty = self.check_value(value, Some(param));
+      self.expect_assignable(param, ty, value.span, "this argument");
+      bound.push(BoundArgument::Expression(value.id));
+    }
+    match signature.variadic {
+      Some(element) => {
+        let mut ids = Vec::new();
+        for &value in supplied.iter().skip(fixed) {
+          let ty = self.check_value(value, Some(element));
+          self.expect_assignable(element, ty, value.span, "this variadic argument");
+          ids.push(value.id);
+        }
+        bound.push(BoundArgument::Variadic(ids));
+      }
+      None => {
+        for &value in supplied.iter().skip(fixed) {
+          self.check_value(value, None);
+        }
+      }
+    }
+
+    if sound {
+      self.calls.insert(
+        node,
+        ResolvedCall {
+          callee: Callee::Closure,
+          arguments: bound,
+          type_arguments: Vec::new(),
+          failable: signature.failable,
+        },
+      );
+    }
+    if signature.failable {
+      self.context.failable_of(signature.ret)
+    } else {
+      signature.ret
+    }
+  }
+
+  fn check_builtin_call(
+    &mut self,
+    node: NodeId,
+    method: BuiltinMethod,
+    receiver: NodeId,
+    params: Vec<TypeId>,
+    ret: TypeId,
+    args: &[Argument],
+    span: Span,
+  ) -> TypeId {
+    let mut sound = self.demand_positional(args, "a builtin method");
+    if args.len() != params.len() {
+      self.report(CompileError::at(
+        ErrorCode::WrongArgumentCount,
+        span,
+        format!(
+          "`{}` takes {} argument{}, but {} {} supplied",
+          method.spelling(),
+          params.len(),
+          if params.len() == 1 { "" } else { "s" },
+          args.len(),
+          if args.len() == 1 { "was" } else { "were" }
+        ),
+      ));
+      sound = false;
+    }
+
+    let mut bound = vec![BoundArgument::Receiver(receiver)];
+    for (index, argument) in args.iter().enumerate() {
+      match params.get(index) {
+        Some(&param) => {
+          let ty = self.check_value(&argument.value, Some(param));
+          self.expect_assignable(param, ty, argument.value.span, "this argument");
+          bound.push(BoundArgument::Expression(argument.value.id));
+        }
+        None => {
+          self.check_value(&argument.value, None);
+        }
+      }
+    }
+
+    if sound {
+      self.calls.insert(
+        node,
+        ResolvedCall {
+          callee: Callee::Builtin(method),
+          arguments: bound,
+          type_arguments: Vec::new(),
+          failable: false,
+        },
+      );
+    }
+    ret
+  }
+
+  fn check_predeclared_call(
+    &mut self,
+    node: NodeId,
+    value: Predeclared,
+    args: &[Argument],
+    span: Span,
+  ) -> TypeId {
+    let mut sound = self.demand_positional(args, "a builtin");
+    let (least, most) = match value {
+      Predeclared::Assert => (1, 2),
+      Predeclared::OsArgs | Predeclared::OsError => (0, 0),
+      Predeclared::WriteFileText | Predeclared::WriteFileBytes | Predeclared::OsRun => (2, 2),
+      _ => (1, 1),
+    };
+    if args.len() < least || args.len() > most {
+      let wanted = if least == most {
+        format!("{least} argument{}", if least == 1 { "" } else { "s" })
+      } else {
+        format!("{least} or {most} arguments")
+      };
+      self.report(CompileError::at(
+        ErrorCode::WrongArgumentCount,
+        span,
+        format!(
+          "`{}` takes {wanted}, but {} {} supplied",
+          value.spelling(),
+          args.len(),
+          if args.len() == 1 { "was" } else { "were" }
+        ),
+      ));
+      sound = false;
+    }
+
+    let mut bound = Vec::new();
+    match value {
+      Predeclared::Print | Predeclared::Println => {
+        if let Some(argument) = args.first() {
+          let ty = self.check_value(&argument.value, None);
+          self.check_interpolation(ty, argument.value.span);
+          bound.push(BoundArgument::Expression(argument.value.id));
+        }
+      }
+      Predeclared::Panic => {
+        if let Some(argument) = args.first() {
+          let ty = self.check_value(&argument.value, Some(TypeId::STRING));
+          self.expect_assignable(
+            TypeId::STRING,
+            ty,
+            argument.value.span,
+            "the panic message",
+          );
+          bound.push(BoundArgument::Expression(argument.value.id));
+        }
+      }
+      Predeclared::Assert => {
+        if let Some(argument) = args.first() {
+          let ty = self.check_value(&argument.value, Some(TypeId::BOOL));
+          self.demand_bool(ty, argument.value.span);
+          bound.push(BoundArgument::Expression(argument.value.id));
+        }
+        if let Some(argument) = args.get(1) {
+          let ty = self.check_value(&argument.value, Some(TypeId::STRING));
+          self.expect_assignable(
+            TypeId::STRING,
+            ty,
+            argument.value.span,
+            "the assertion message",
+          );
+          bound.push(BoundArgument::Expression(argument.value.id));
+        }
+      }
+      Predeclared::Len => {
+        if let Some(argument) = args.first() {
+          let ty = self.check_value(&argument.value, None);
+          let resolved = self.context.shallow_resolve(ty);
+          if !self.has_length(resolved)
+            && !matches!(
+              self.context.kind(resolved),
+              TypeKind::Error | TypeKind::Never
+            )
+          {
+            let shown = self.show(resolved);
+            self.report(
+              CompileError::at(
+                ErrorCode::TypeMismatch,
+                argument.value.span,
+                format!("`len` has no meaning for `{shown}`"),
+              )
+              .with_note("`len` takes an array, a map, a set or a string"),
+            );
+          }
+          bound.push(BoundArgument::Expression(argument.value.id));
+        }
+      }
+      // May cua vao he dieu hanh. Tham so dau bao gio cung la mot duong
+      // dan hoac mot ten chuong trinh, nen kiem chung mot cho.
+      Predeclared::ReadFileText
+      | Predeclared::ReadFileBytes
+      | Predeclared::WriteFileText
+      | Predeclared::WriteFileBytes
+      | Predeclared::OsRun => {
+        if let Some(argument) = args.first() {
+          let ty = self.check_value(&argument.value, Some(TypeId::STRING));
+          self.expect_assignable(TypeId::STRING, ty, argument.value.span, "the path");
+          bound.push(BoundArgument::Expression(argument.value.id));
+        }
+        if let Some(argument) = args.get(1) {
+          let wanted = self.predeclared_payload(value);
+          let ty = self.check_value(&argument.value, Some(wanted));
+          self.expect_assignable(wanted, ty, argument.value.span, "the data");
+          bound.push(BoundArgument::Expression(argument.value.id));
+        }
+      }
+      Predeclared::OsArgs | Predeclared::OsError => {}
+    }
+    for extra in args.iter().skip(most) {
+      self.check_value(&extra.value, None);
+    }
+
+    if sound {
+      self.calls.insert(
+        node,
+        ResolvedCall {
+          callee: Callee::Predeclared(value),
+          arguments: bound,
+          type_arguments: Vec::new(),
+          failable: false,
+        },
+      );
+    }
+    match value {
+      Predeclared::Panic => TypeId::NEVER,
+      Predeclared::Len => TypeId::INT,
+      // Doc thi tra ve `T?`, null la hong. Ghi thi tra ve co/khong.
+      // Cai gi hong thi `os_error()` noi. Xem `runtime/src/os.rs`.
+      Predeclared::ReadFileText => self.context.optional_of(TypeId::STRING),
+      Predeclared::ReadFileBytes => {
+        let bytes = self.context.array_of(TypeId::INT);
+        self.context.optional_of(bytes)
+      }
+      Predeclared::WriteFileText | Predeclared::WriteFileBytes => TypeId::BOOL,
+      Predeclared::OsArgs => self.context.array_of(TypeId::STRING),
+      Predeclared::OsRun => self.context.optional_of(TypeId::INT),
+      Predeclared::OsError => TypeId::STRING,
+      _ => TypeId::VOID,
+    }
+  }
+
+  /// The type of the second argument of a two-argument builtin.
+  fn predeclared_payload(&mut self, value: Predeclared) -> TypeId {
+    match value {
+      Predeclared::WriteFileText => TypeId::STRING,
+      Predeclared::WriteFileBytes => self.context.array_of(TypeId::INT),
+      Predeclared::OsRun => self.context.array_of(TypeId::STRING),
+      _ => TypeId::ERROR,
+    }
+  }
+
+  fn check_conversion_call( &mut self, node: NodeId, target: TypeId, args: &[Argument], span: Span, ) -> TypeId {
+    let mut sound = self.demand_positional(args, "a conversion");
+    let shown_target = self.show(target);
+    if args.len() != 1 {
+      self.report(
+        CompileError::at(
+          ErrorCode::WrongArgumentCount,
+          span,
+          format!(
+            "`{shown_target}` converts exactly one value, but {} {} supplied",
+            args.len(),
+            if args.len() == 1 { "was" } else { "were" }
+          ),
+        )
+        .with_help(format!("write `{shown_target}(x)`")),
+      );
+      self.check_arguments_for_recovery(args);
+      return target;
+    }
+
+    let source = self.check_value(&args[0].value, None);
+    let source = self.context.shallow_resolve(source);
+    if !self.conversion_is_legal(target, source) {
+      let shown_source = self.show(source);
+      self.report(
+        CompileError::at(
+          ErrorCode::InvalidConversion,
+          args[0].value.span,
+          format!("`{shown_source}` cannot be converted to `{shown_target}`"),
+        )
+        .with_note(
+          "the conversions are `int`, `uint` and `float` between the numbers and \
+           `char`, `char` from an integer, and `string` from any primitive",
+        ),
+      );
+      sound = false;
+    }
+
+    if sound {
+      self.calls.insert(
+        node,
+        ResolvedCall {
+          callee: Callee::Conversion { target },
+          arguments: vec![BoundArgument::Expression(args[0].value.id)],
+          type_arguments: Vec::new(),
+          failable: false,
+        },
+      );
+    }
+    target
+  }
+
+  fn conversion_is_legal(&mut self, target: TypeId, source: TypeId) -> bool {
+    if matches!(self.context.kind(source), TypeKind::Error | TypeKind::Never) {
+      return true;
+    }
+    let is_char = matches!(self.context.kind(source), TypeKind::Char);
+    match target {
+      TypeId::INT | TypeId::UINT => self.context.is_numeric(source) || is_char,
+      TypeId::FLOAT => self.context.is_numeric(source),
+      TypeId::CHAR => self.context.is_integer(source) || is_char,
+      TypeId::STRING => {
+        let primitive = matches!(
+          self.context.kind(source),
+          TypeKind::Bool
+            | TypeKind::Int
+            | TypeKind::Uint
+            | TypeKind::Float
+            | TypeKind::Char
+            | TypeKind::String
+            | TypeKind::UntypedInt
+            | TypeKind::UntypedFloat
+        );
+        let stringable = self.prelude.stringable;
+        primitive || self.record_conformance(stringable, source).is_some()
+      }
+      _ => false,
+    }
+  }
+
+  fn check_variant_call(
+    &mut self,
+    node: NodeId,
+    def: DefId,
+    name: &Ident,
+    args: &[Argument],
+    span: Span,
+    expected: Option<TypeId>,
+  ) -> TypeId {
+    let owner = self.context.def(def).name.clone();
+    let Some(enumeration) = self.context.def(def).as_enum().cloned() else {
+      self.report(
+        CompileError::at(
+          ErrorCode::NotAnEnum,
+          name.span,
+          format!(
+            "`{owner}` is not an enum, so `{owner}.{}` names nothing",
+            name.name
+          ),
+        )
+        .with_help(format!("build a struct with `{owner} {{ ... }}`")),
+      );
+      self.check_arguments_for_recovery(args);
+      return TypeId::ERROR;
+    };
+    let Some(index) = enumeration.variant_index(&name.name) else {
+      let names: Vec<&str> = enumeration
+        .variants
+        .iter()
+        .map(|variant| variant.name.as_str())
+        .collect();
+      self.report(
+        CompileError::at(
+          ErrorCode::UnknownVariant,
+          name.span,
+          format!("`{owner}` has no variant `{}`", name.name),
+        )
+        .with_note(format!("its variants are {}", join_names(&names))),
+      );
+      self.check_arguments_for_recovery(args);
+      return TypeId::ERROR;
+    };
+
+    let arguments = self.enum_arguments(def, expected);
+    let payload: Vec<TypeId> = enumeration.variants[index]
+      .payload
+      .clone()
+      .into_iter()
+      .map(|ty| {
+        self.context
+          .substitute(ty, GenericOwner::Type(def), &arguments)
+      })
+      .collect();
+
+    let mut sound = self.demand_positional(args, "a variant payload");
+    if args.len() != payload.len() {
+      self.report(
+        CompileError::at(
+          ErrorCode::WrongArgumentCount,
+          span,
+          format!(
+            "`{owner}.{}` carries {} value{}, but {} {} supplied",
+            name.name,
+            payload.len(),
+            if payload.len() == 1 { "" } else { "s" },
+            args.len(),
+            if args.len() == 1 { "was" } else { "were" }
+          ),
+        )
+        .with_secondary(enumeration.variants[index].span, "declared here"),
+      );
+      sound = false;
+    }
+
+    let mut bound = Vec::new();
+    for (position, argument) in args.iter().enumerate() {
+      match payload.get(position) {
+        Some(&ty) => {
+          let actual = self.check_value(&argument.value, Some(ty));
+          let context = format!("the payload of `{owner}.{}`", name.name);
+          self.expect_assignable(ty, actual, argument.value.span, &context);
+          bound.push(BoundArgument::Expression(argument.value.id));
+        }
+        None => {
+          self.check_value(&argument.value, None);
+        }
+      }
+    }
+
+    let ty = self.context.named(def, arguments);
+    let what = format!("`{owner}.{}`", name.name);
+    if !self.demand_inferred(ty, span, &what) {
+      sound = false;
+    }
+    let ty = self.context.resolve(ty);
+    if sound {
+      let type_arguments = match self.context.kind(ty).clone() {
+        TypeKind::Named { args, .. } => args,
+        _ => Vec::new(),
+      };
+      self.calls.insert(
+        node,
+        ResolvedCall {
+          callee: Callee::Variant {
+            def,
+            variant: index as u32,
+          },
+          arguments: bound,
+          type_arguments,
+          failable: false,
+        },
+      );
+    }
+    ty
+  }
+
+  fn instantiate(
+    &mut self,
+    ty: TypeId,
+    owner: Option<DefId>,
+    owner_args: &[TypeId],
+    func: FuncId,
+    func_args: &[TypeId],
+  ) -> TypeId {
+    let mut ty = ty;
+    if let Some(owner) = owner {
+      if !owner_args.is_empty() {
+        ty = self
+          .context
+          .substitute(ty, GenericOwner::Type(owner), owner_args);
+      }
+    }
+    if !func_args.is_empty() {
+      ty = self
+        .context
+        .substitute(ty, GenericOwner::Func(func), func_args);
+    }
+    ty
+  }
+
+  fn owner_arguments(&self, receiver: TypeId) -> Vec<TypeId> {
+    match self.context.kind(self.context.shallow_resolve(receiver)) {
+      TypeKind::Named { args, .. } => args.clone(),
+      _ => Vec::new(),
+    }
+  }
+
+  fn demand_positional(&mut self, args: &[Argument], what: &str) -> bool {
+    let mut positional = true;
+    for argument in args {
+      if let Some(label) = &argument.name {
+        self.report(
+          CompileError::at(
+            ErrorCode::NamedArgumentThroughValue,
+            label.span,
+            format!("{what} has no parameter names"),
+          )
+          .with_help("pass this argument positionally"),
+        );
+        positional = false;
+      }
+    }
+    positional
+  }
+
+  fn reject_turbofish(&mut self, explicit: &Option<(Vec<TypeId>, Span)>) {
+    let Some((_, span)) = explicit else { return };
+    self.report(
+      CompileError::at(
+        ErrorCode::TurbofishNotAllowed,
+        *span,
+        "this callee takes no type arguments",
+      )
+      .with_help("drop the `::<...>`"),
+    );
+  }
+
+  fn check_arguments_for_recovery(&mut self, args: &[Argument]) {
+    for argument in args {
+      self.check_value(&argument.value, None);
+    }
+  }
+}
+
+impl Checker<'_> {
+  fn check_struct_literal(&mut self, expr: &Expr, expected: Option<TypeId>) -> TypeId {
+    let ExprKind::StructLit(literal) = &expr.kind else {
+      return TypeId::ERROR;
+    };
+    let Some(ValueBinding::Type(def)) = self.values.get(&expr.id).copied() else {
+      for field in &literal.fields {
+        self.check_value(&field.value, None);
+      }
+      return TypeId::ERROR;
+    };
+
+    let name = self.context.def(def).name.clone();
+    let Some(structure) = self.context.def(def).as_struct().cloned() else {
+      self.report(
+        CompileError::at(
+          ErrorCode::NotAStruct,
+          literal.path.span,
+          format!("`{name}` is not a struct, so it has no field initialisers"),
+        )
+        .with_help("name an enum variant with `Enum.Variant`"),
+      );
+      for field in &literal.fields {
+        self.check_value(&field.value, None);
+      }
+      return TypeId::ERROR;
+    };
+
+    let arguments = self.struct_arguments(def, literal, expected);
+
+    let mut initialised = vec![false; structure.fields.len()];
+    for field in &literal.fields {
+      let Some(index) = structure.field_index(&field.name.name) else {
+        let names: Vec<&str> = structure
+          .fields
+          .iter()
+          .map(|declared| declared.name.as_str())
+          .collect();
+        self.report(
+          CompileError::at(
+            ErrorCode::UnknownStructField,
+            field.name.span,
+            format!("`{name}` has no field `{}`", field.name.name),
+          )
+          .with_note(format!("its fields are {}", join_names(&names))),
+        );
+        self.check_value(&field.value, None);
+        continue;
+      };
+      if initialised[index] {
+        self.report(
+          CompileError::at(
+            ErrorCode::DuplicateStructFieldInit,
+            field.name.span,
+            format!("`{}` is initialised twice", field.name.name),
+          )
+          .with_help("remove one of the two"),
+        );
+      }
+      initialised[index] = true;
+
+      let declared = structure.fields[index].clone();
+      self.check_field_visibility(def, &declared, field.name.span);
+      let ty = self
+        .context
+        .substitute(declared.ty, GenericOwner::Type(def), &arguments);
+      let value = self.check_value(&field.value, Some(ty));
+      let position = format!("the field `{}`", field.name.name);
+      self.expect_assignable(ty, value, field.value.span, &position);
+    }
+
+    let missing: Vec<&str> = structure
+      .fields
+      .iter()
+      .zip(&initialised)
+      .filter(|(_, seen)| !**seen)
+      .map(|(field, _)| field.name.as_str())
+      .collect();
+    if !missing.is_empty() {
+      self.report(
+        CompileError::at(
+          ErrorCode::MissingStructField,
+          literal.span,
+          format!("this `{name}` is missing {}", join_names(&missing)),
+        )
+        .with_secondary(self.context.def(def).span, "declared here")
+        .with_note("Pump 1.0 has no field defaults, so every field must be given"),
+      );
+    }
+
+    let ty = self.context.named(def, arguments);
+    self.demand_inferred(ty, literal.path.span, &format!("`{name}`"));
+    self.context.resolve(ty)
+  }
+
+  fn struct_arguments(
+    &mut self,
+    def: DefId,
+    literal: &crate::ast::StructLit,
+    expected: Option<TypeId>,
+  ) -> Vec<TypeId> {
+    let arity = self.context.def(def).generics.len();
+    if !literal.type_args.is_empty() {
+      let written: Vec<TypeId> = literal
+        .type_args
+        .iter()
+        .map(|argument| {
+          self.written_types
+            .get(&argument.id)
+            .copied()
+            .unwrap_or(TypeId::ERROR)
+        })
+        .collect();
+      if written.len() == arity {
+        return written;
+      }
+      let name = self.context.def(def).name.clone();
+      let declared = self.context.def(def).span;
+      self.report(
+        CompileError::at(
+          ErrorCode::WrongTypeArgumentCount,
+          literal.path.span,
+          format!(
+            "`{name}` takes {arity} type argument{}, but {} {} written",
+            if arity == 1 { "" } else { "s" },
+            written.len(),
+            if written.len() == 1 { "was" } else { "were" }
+          ),
+        )
+        .with_secondary(declared, "declared here"),
+      );
+    }
+    if arity == 0 {
+      return Vec::new();
+    }
+    if let Some(hint) = self.literal_expectation(expected) {
+      if let TypeKind::Named {
+        def: other,
+        ref args,
+      } = *self.context.kind(hint)
+      {
+        if other == def && args.len() == arity {
+          return args.clone();
+        }
+      }
+    }
+    (0..arity).map(|_| self.context.fresh_var()).collect()
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::errors::Diagnostics;
+  use crate::{lexer, parser, resolve, Session};
+
+  fn diagnose(source: &str) -> Diagnostics {
+    let mut session = Session::new();
+    let file = session.sources.add("test.pump", source.to_string());
+    let text = source.to_string();
+
+    let tokens = lexer::tokenize(file, &text, &mut session.diagnostics);
+    let unit = parser::parse(
+      file,
+      vec!["test".to_string()],
+      &tokens,
+      &mut session.node_ids,
+      &mut session.diagnostics,
+    );
+
+    let mut collected = Diagnostics::new();
+    let resolution = resolve::resolve(
+      vec![unit],
+      std::path::Path::new("."),
+      &mut session,
+      &mut collected,
+    )
+    .expect("the entry unit always resolves");
+
+    let mut from_checking = Diagnostics::new();
+    let _ = check(resolution, &mut from_checking);
+
+    let mut all = std::mem::take(&mut session.diagnostics);
+    all.extend(collected);
+    all.extend(from_checking);
+    all
+  }
+
+  fn error_codes(source: &str) -> Vec<ErrorCode> {
+    diagnose(source)
+      .entries()
+      .iter()
+      .filter(|entry| entry.is_error())
+      .map(|entry| entry.code)
+      .collect()
+  }
+
+  fn in_main(body: &str) -> String {
+    format!("fn main() {{\n{body}\n}}\n")
+  }
+
+  #[track_caller]
+  fn assert_reports(source: &str, code: ErrorCode) {
+    let found = error_codes(source);
+    assert!(
+      found.contains(&code),
+      "expected {code:?}, found {found:?}\n--- source ---\n{source}"
+    );
+  }
+
+  #[track_caller]
+  fn assert_clean(source: &str) {
+    let found = error_codes(source);
+    assert!(
+      found.is_empty(),
+      "expected no errors, found {found:?}\n--- source ---\n{source}"
+    );
+  }
+
+  #[test]
+  fn print_accepts_anything_an_interpolation_accepts() {
+    assert_clean(
+      "fn main() {
+  println(42)
+  println(3.5)
+  println(true)
+  println('c')
+  print(\"s\")
+}
+",
+    );
+  }
+
+  #[test]
+  fn the_operating_system_builtins_have_the_types_they_advertise() {
+    assert_clean(
+      "fn main() {
+  let text: string? = read_file_text(\"a.txt\")
+  let bytes: [int]? = read_file_bytes(\"a.bin\")
+  let wrote: bool = write_file_text(\"a.txt\", \"hi\")
+  let dumped: bool = write_file_bytes(\"a.bin\", [1, 2, 3])
+  let arguments: [string] = os_args()
+  let code: int? = os_run(\"linker\", [\"a.o\"])
+  let why: string = os_error()
+  println(len(arguments))
+}
+",
+    );
+  }
+
+  #[test]
+  fn reading_a_file_gives_an_optional_that_has_to_be_narrowed() {
+    // Null la cach may cua vao tho bao that bai. Muon mot `string` thang
+    // thi dung `io.read_text`, no `fail` ho.
+    assert_reports(
+      &in_main("let text: string = read_file_text(\"a.txt\")"),
+      ErrorCode::TypeMismatch,
+    );
+  }
+
+  #[test]
+  fn writing_bytes_wants_an_array_of_int() {
+    assert_reports(
+      &in_main("write_file_bytes(\"a.bin\", \"not an array\")"),
+      ErrorCode::TypeMismatch,
+    );
+    assert_reports(
+      &in_main("write_file_text(42, \"text\")"),
+      ErrorCode::TypeMismatch,
+    );
+  }
+
+  #[test]
+  fn the_argument_free_builtins_take_no_arguments() {
+    assert_reports(
+      &in_main("println(len(os_args(1)))"),
+      ErrorCode::WrongArgumentCount,
+    );
+    assert_reports(
+      &in_main("println(os_error(\"why\"))"),
+      ErrorCode::WrongArgumentCount,
+    );
+    assert_reports(
+      &in_main("println(read_file_text())"),
+      ErrorCode::WrongArgumentCount,
+    );
+  }
+
+  #[test]
+  fn an_operating_system_builtin_may_be_shadowed_like_any_prelude_value() {
+    // 2.5.1: may ten nay o prelude nen shadow duoc, khac han `int` hay
+    // `Error`. Cai nay quan trong that: prelude vua phinh ra bay ten.
+    assert_clean(
+      "fn os_args(): int {
+  return 7
+}
+
+fn main() {
+  println(os_args())
+}
+",
+    );
+  }
+
+  #[test]
+  fn a_bounded_type_parameter_is_stringable() {
+    assert_clean(
+      "fn show<T: Stringable>(value: T) {
+  println(\"{value}\")
+}
+
+fn main() {
+  show(1)
+}
+",
+    );
+  }
+
+  #[test]
+  fn an_unbounded_type_parameter_is_not_stringable() {
+    let found = error_codes(
+      "fn show<T>(value: T) {
+  println(\"{value}\")
+}
+
+fn main() {
+  show(1)
+}
+",
+    );
+    assert!(
+      found.contains(&ErrorCode::InvalidInterpolation),
+      "{found:?}"
+    );
+  }
+
+  #[test]
+  fn a_map_setter_is_reachable_after_a_dot() {
+    // `set` la tu khoa (2.3.2) nen method khong the ten la `set`, phai la
+    // `insert`
+    assert_clean(
+      "fn main() {
+  let m: [string: int] = {}
+  m.insert(\"a\", 1)
+  println(m.length)
+}
+",
+    );
+  }
+
+  #[track_caller]
+  fn assert_message_contains(source: &str, code: ErrorCode, fragment: &str) {
+    let diagnostics = diagnose(source);
+    let rendered: Vec<&str> = diagnostics
+      .entries()
+      .iter()
+      .filter(|entry| entry.code == code)
+      .map(|entry| entry.message.as_str())
+      .collect();
+    assert!(
+      rendered.iter().any(|message| message.contains(fragment)),
+      "no {code:?} message contained {fragment:?}; messages were {rendered:?}\
+       \n--- source ---\n{source}"
+    );
+  }
+
+  #[test]
+  fn a_let_with_no_annotation_takes_the_initialiser_type() {
+    assert_clean(&in_main(
+      "let age = 18\nlet name = \"Minh\"\nprintln(name)\nprintln(age)",
+    ));
+  }
+
+  #[test]
+  fn a_const_binding_cannot_be_reassigned() {
+    assert_reports(
+      &in_main("const x = 10\nx = 20"),
+      ErrorCode::CannotAssignToConst,
+    );
+  }
+
+  #[test]
+  fn a_let_binding_can_be_reassigned() {
+    assert_clean(&in_main(
+      "let count = 0\ncount = 10\ncount += 1\nprintln(count)",
+    ));
+  }
+
+  #[test]
+  fn a_for_binding_cannot_be_reassigned() {
+    assert_reports(
+      &in_main("for i in 0..10 {\ni = 3\n}"),
+      ErrorCode::CannotAssignToLoopBinding,
+    );
+  }
+
+  #[test]
+  fn an_annotation_and_its_initialiser_must_agree() {
+    assert_reports(&in_main("let age: int = \"x\""), ErrorCode::TypeMismatch);
+  }
+
+  #[test]
+  fn int_and_float_never_mix_implicitly() {
+    assert_reports(
+      &in_main("let a: int = 1\nlet b: float = 2.0\nprintln(a + b)"),
+      ErrorCode::NoImplicitConversion,
+    );
+  }
+
+  #[test]
+  fn an_explicit_conversion_bridges_the_two() {
+    assert_clean(&in_main(
+      "let a: int = 1\nlet b: float = 2.0\nprintln(float(a) + b)",
+    ));
+  }
+
+  #[test]
+  fn a_float_literal_never_adopts_an_integer_type() {
+    assert_reports(&in_main("let a: int = 1.5"), ErrorCode::LiteralOutOfRange);
+  }
+
+  #[test]
+  fn an_integer_literal_adopts_uint_from_its_context() {
+    assert_clean(&in_main("let a: uint = 7\nprintln(a)"));
+  }
+
+  #[test]
+  fn uint_cannot_be_negated() {
+    assert_reports(
+      &in_main("let a: uint = 7\nprintln(-a)"),
+      ErrorCode::NegateUnsigned,
+    );
+  }
+
+  #[test]
+  fn char_has_no_arithmetic() {
+    assert_reports(
+      &in_main("let c = 'a'\nprintln(c + c)"),
+      ErrorCode::CharArithmetic,
+    );
+  }
+
+  #[test]
+  fn bitwise_binds_two_integers_of_the_same_type() {
+    assert_clean(&in_main("let a = 6\nlet b = 3\nprintln(a & b)"));
+  }
+
+  #[test]
+  fn bitwise_rejects_a_float() {
+    assert_reports(
+      &in_main("let a = 1.5\nprintln(a & a)"),
+      ErrorCode::BitwiseOnNonInteger,
+    );
+  }
+
+  #[test]
+  fn a_condition_must_be_bool() {
+    assert_reports(
+      &in_main("let n = 1\nif n {\nprintln(n)\n}"),
+      ErrorCode::NoTruthiness,
+    );
+  }
+
+  #[test]
+  fn the_truthiness_error_suggests_a_comparison() {
+    assert_message_contains(
+      &in_main("let n = 1\nif n {\nprintln(n)\n}"),
+      ErrorCode::NoTruthiness,
+      "must be `bool`",
+    );
+  }
+
+  #[test]
+  fn null_is_assignable_only_to_an_optional() {
+    assert_reports(&in_main("let u: int = null"), ErrorCode::TypeMismatch);
+    assert_clean(&in_main("let u: int? = null\nprintln(u == null)"));
+  }
+
+  #[test]
+  fn an_optional_field_needs_a_null_test_first() {
+    let source = "\
+struct User {
+  name: string
+}
+
+fn main() {
+  let u: User? = null
+  println(u.name)
+}
+";
+    assert_reports(source, ErrorCode::UnknownField);
+  }
+
+  #[test]
+  fn a_null_test_narrows_the_then_branch() {
+    let source = "\
+struct User {
+  name: string
+}
+
+fn main() {
+  let u: User? = null
+  if u != null {
+    println(u.name)
+  }
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn narrowing_chains_through_an_and() {
+    let source = "\
+struct User {
+  name: string
+  age: int
+}
+
+fn main() {
+  let u: User? = null
+  if u != null && u.age > 18 {
+    println(u.name)
+  }
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn an_early_return_narrows_the_rest_of_the_body() {
+    let source = "\
+struct User {
+  name: string
+}
+
+fn main() {
+  let u: User? = null
+  if u == null {
+    return
+  }
+  println(u.name)
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn narrowing_does_not_survive_an_assignment_in_the_region() {
+    let source = "\
+struct User {
+  name: string
+}
+
+fn main() {
+  let u: User? = null
+  if u != null {
+    u = null
+    println(u.name)
+  }
+}
+";
+    assert_reports(source, ErrorCode::UnknownField);
+  }
+
+  #[test]
+  fn a_bare_optional_does_not_narrow_on_a_field_path() {
+    let source = "\
+struct Node {
+  next: Node?
+  value: int
+}
+
+fn main() {
+  let n = Node { next: null, value: 1 }
+  if n.next != null {
+    println(n.next.value)
+  }
+}
+";
+    assert_reports(source, ErrorCode::UnknownField);
+  }
+
+  #[test]
+  fn postfix_question_needs_an_optional_return_type() {
+    let source = "\
+fn first(items: [int]): int {
+  let head: int? = null
+  return head?
+}
+
+fn main() {
+  println(first([1]))
+}
+";
+    assert_reports(source, ErrorCode::PropagateNullInNonOptional);
+  }
+
+  #[test]
+  fn postfix_question_is_fine_in_an_optional_function() {
+    let source = "\
+fn first(items: [int]): int? {
+  let head: int? = null
+  return head?
+}
+
+fn main() {
+  let value = first([1])
+  println(value == null)
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn a_failable_call_must_be_consumed() {
+    let source = "\
+fn read(): string! {
+  return \"data\"
+}
+
+fn main() {
+  let text = read()
+  println(text)
+}
+";
+    assert_reports(source, ErrorCode::UnhandledError);
+  }
+
+  #[test]
+  fn propagation_needs_a_failable_caller() {
+    let source = "\
+fn read(): string! {
+  return \"data\"
+}
+
+fn main() {
+  let text = read()!
+  println(text)
+}
+";
+    assert_reports(source, ErrorCode::PropagateErrorInNonFailable);
+  }
+
+  #[test]
+  fn propagation_is_fine_inside_a_failable_function() {
+    let source = "\
+fn read(): string! {
+  return \"data\"
+}
+
+fn load(): string! {
+  let text = read()!
+  return text
+}
+
+fn main() {
+  let text = load() catch {
+    return
+  }
+  println(text)
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn a_catch_block_must_diverge() {
+    let source = "\
+fn read(): string! {
+  return \"data\"
+}
+
+fn main() {
+  let text = read() catch {
+    println(\"oops\")
+  }
+  println(text)
+}
+";
+    assert_reports(source, ErrorCode::CatchBlockFallsThrough);
+  }
+
+  #[test]
+  fn a_catch_value_supplies_a_fallback() {
+    let source = "\
+fn read(): string! {
+  return \"data\"
+}
+
+fn main() {
+  let text = read() catch \"\"
+  println(text)
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn catch_on_something_that_cannot_fail_is_an_error() {
+    assert_reports(
+      &in_main("let n = 1 catch 2\nprintln(n)"),
+      ErrorCode::CatchOnNonFailable,
+    );
+  }
+
+  #[test]
+  fn fail_needs_a_failable_function() {
+    let source = "\
+fn f(): string {
+  fail \"nope\"
+}
+
+fn main() {
+  println(f())
+}
+";
+    assert_reports(source, ErrorCode::FailOutsideFailable);
+  }
+
+  #[test]
+  fn a_caught_error_is_bound_with_a_message() {
+    let source = "\
+fn read(): string! {
+  fail \"nope\"
+}
+
+fn main() {
+  let text = read() catch e {
+    println(e.message())
+    return
+  }
+  println(text)
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn a_missing_argument_is_named() {
+    let source = "\
+fn connect(host: string, port: int) {
+  println(host)
+  println(port)
+}
+
+fn main() {
+  connect(\"localhost\")
+}
+";
+    assert_reports(source, ErrorCode::MissingArgument);
+    assert_message_contains(source, ErrorCode::MissingArgument, "port");
+  }
+
+  #[test]
+  fn a_default_fills_an_omitted_parameter() {
+    let source = "\
+fn connect(host: string, port: int = 80) {
+  println(host)
+  println(port)
+}
+
+fn main() {
+  connect(\"localhost\")
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn named_arguments_bind_by_name() {
+    let source = "\
+fn connect(host: string, port: int = 80) {
+  println(host)
+  println(port)
+}
+
+fn main() {
+  connect(host: \"localhost\", port: 8080)
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn naming_an_already_filled_parameter_is_an_error() {
+    let source = "\
+fn connect(host: string, port: int = 80) {
+  println(host)
+  println(port)
+}
+
+fn main() {
+  connect(\"localhost\", host: \"other\")
+}
+";
+    assert_reports(source, ErrorCode::ArgumentSuppliedTwice);
+  }
+
+  #[test]
+  fn an_unknown_parameter_name_is_an_error() {
+    let source = "\
+fn connect(host: string) {
+  println(host)
+}
+
+fn main() {
+  connect(hostname: \"localhost\")
+}
+";
+    assert_reports(source, ErrorCode::UnknownNamedArgument);
+  }
+
+  #[test]
+  fn a_variadic_collects_the_trailing_arguments() {
+    let source = "\
+fn total(values: ...int): int {
+  let sum = 0
+  for value in values {
+    sum += value
+  }
+  return sum
+}
+
+fn main() {
+  println(total(1, 2, 3))
+  println(total())
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn a_variadic_cannot_be_passed_by_name() {
+    let source = "\
+fn total(values: ...int): int {
+  return 0
+}
+
+fn main() {
+  println(total(values: 1))
+}
+";
+    assert_reports(source, ErrorCode::VariadicPassedByName);
+  }
+
+  #[test]
+  fn too_many_arguments_is_an_arity_error() {
+    let source = "\
+fn one(a: int) {
+  println(a)
+}
+
+fn main() {
+  one(1, 2)
+}
+";
+    assert_reports(source, ErrorCode::WrongArgumentCount);
+  }
+
+  #[test]
+  fn a_type_argument_is_inferred_from_the_arguments() {
+    let source = "\
+fn first<T>(items: [T]): T? {
+  if items.length == 0 {
+    return null
+  }
+  return items[0]
+}
+
+fn main() {
+  let head = first([1, 2, 3])
+  println(head == null)
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn a_turbofish_pins_the_instantiation() {
+    let source = "\
+fn identity<T>(value: T): T {
+  return value
+}
+
+fn main() {
+  println(identity::<int>(1))
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn a_turbofish_of_the_wrong_arity_is_an_error() {
+    let source = "\
+fn identity<T>(value: T): T {
+  return value
+}
+
+fn main() {
+  println(identity::<int, string>(1))
+}
+";
+    assert_reports(source, ErrorCode::WrongTypeArgumentCount);
+  }
+
+  #[test]
+  fn a_generic_struct_infers_from_its_fields() {
+    let source = "\
+struct Box<T> {
+  value: T
+}
+
+fn main() {
+  let b = Box { value: 1 }
+  println(b.value)
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn an_unbounded_type_parameter_has_no_methods() {
+    let source = "\
+fn describe<T>(value: T): string {
+  return value.to_string()
+}
+
+fn main() {
+  println(describe(1))
+}
+";
+    assert_reports(source, ErrorCode::MethodOnUnboundedGeneric);
+  }
+
+  #[test]
+  fn structural_conformance_satisfies_an_interface() {
+    let source = "\
+interface Printable {
+  fn describe(): string
+}
+
+struct User {
+  name: string
+
+  fn describe(): string {
+    return name
+  }
+}
+
+implements User: Printable
+
+fn show(item: Printable) {
+  println(item.describe())
+}
+
+fn main() {
+  show(User { name: \"Minh\" })
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn a_missing_method_fails_the_assertion() {
+    let source = "\
+interface Printable {
+  fn describe(): string
+}
+
+struct User {
+  name: string
+}
+
+implements User: Printable
+
+fn main() {
+  println(User { name: \"Minh\" }.name)
+}
+";
+    assert_reports(source, ErrorCode::InterfaceNotSatisfied);
+  }
+
+  #[test]
+  fn a_mismatched_signature_fails_the_assertion() {
+    let source = "\
+interface Printable {
+  fn describe(): string
+}
+
+struct User {
+  name: string
+
+  fn describe(): int {
+    return 1
+  }
+}
+
+implements User: Printable
+
+fn main() {
+  println(User { name: \"Minh\" }.describe())
+}
+";
+    assert_reports(source, ErrorCode::InterfaceNotSatisfied);
+  }
+
+  #[test]
+  fn a_field_resolves_with_no_prefix_inside_a_method() {
+    let source = "\
+struct User {
+  name: string
+
+  fn greet() {
+    println(\"Hello \" + name)
+  }
+}
+
+fn main() {
+  User { name: \"Minh\" }.greet()
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn a_parameter_shadows_a_field_and_this_reaches_it() {
+    let source = "\
+struct User {
+  name: string
+
+  fn rename(name: string) {
+    this.name = name
+  }
+}
+
+fn main() {
+  let u = User { name: \"Minh\" }
+  u.rename(\"Linh\")
+  println(u.name)
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn a_struct_literal_must_give_every_field() {
+    let source = "\
+struct User {
+  name: string
+  age: int
+}
+
+fn main() {
+  let u = User { name: \"Minh\" }
+  println(u.name)
+}
+";
+    assert_reports(source, ErrorCode::MissingStructField);
+    assert_message_contains(source, ErrorCode::MissingStructField, "age");
+  }
+
+  #[test]
+  fn an_unknown_field_in_a_literal_is_named() {
+    let source = "\
+struct User {
+  name: string
+}
+
+fn main() {
+  let u = User { name: \"Minh\", age: 18 }
+  println(u.name)
+}
+";
+    assert_reports(source, ErrorCode::UnknownStructField);
+  }
+
+  #[test]
+  fn a_field_of_a_const_binding_stays_assignable() {
+    let source = "\
+struct User {
+  name: string
+  age: int
+}
+
+fn main() {
+  const u = User { name: \"Minh\", age: 18 }
+  u.age = 19
+  println(u.age)
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn an_empty_collection_literal_needs_an_annotation() {
+    assert_reports(&in_main("let items = []"), ErrorCode::CannotInferType);
+  }
+
+  #[test]
+  fn an_annotated_empty_collection_is_fine() {
+    assert_clean(&in_main(
+      "let items: [int] = []\nlet users: [string: int] = {}\nprintln(items.length + users.length)",
+    ));
+  }
+
+  #[test]
+  fn float_may_not_be_a_map_key() {
+    assert_reports(
+      &in_main("let m: [float: int] = {}\nprintln(m.length)"),
+      ErrorCode::FloatNotHashable,
+    );
+  }
+
+  #[test]
+  fn a_string_is_not_indexable() {
+    assert_reports(
+      &in_main("let s = \"hi\"\nprintln(s[0])"),
+      ErrorCode::StringNotIndexable,
+    );
+  }
+
+  #[test]
+  fn a_map_index_yields_the_value_type() {
+    assert_clean(&in_main(
+      "let m: [string: int] = {}\nlet n: int = m[\"a\"]\nprintln(n)",
+    ));
+  }
+
+  #[test]
+  fn a_tuple_element_is_reached_by_position() {
+    assert_clean(&in_main("let p: (int, int) = (10, 20)\nprintln(p.0 + p.1)"));
+  }
+
+  #[test]
+  fn a_tuple_index_past_the_end_is_an_error() {
+    assert_reports(
+      &in_main("let p: (int, int) = (10, 20)\nprintln(p.2)"),
+      ErrorCode::TupleIndexOutOfRange,
+    );
+  }
+
+  #[test]
+  fn a_match_over_an_enum_must_be_exhaustive() {
+    let source = "\
+enum Color {
+  Red
+  Green
+  Blue
+}
+
+fn main() {
+  let c = Color.Red
+  match c {
+    Color.Red => println(\"red\")
+    Color.Green => println(\"green\")
+  }
+}
+";
+    assert_reports(source, ErrorCode::NonExhaustiveMatch);
+    assert_message_contains(source, ErrorCode::NonExhaustiveMatch, "does not cover");
+  }
+
+  #[test]
+  fn the_missing_variant_is_named() {
+    let source = "\
+enum Color {
+  Red
+  Green
+  Blue
+}
+
+fn main() {
+  let c = Color.Red
+  match c {
+    Color.Red => println(\"red\")
+    Color.Green => println(\"green\")
+  }
+}
+";
+    let diagnostics = diagnose(source);
+    let notes: Vec<String> = diagnostics
+      .entries()
+      .iter()
+      .filter(|entry| entry.code == ErrorCode::NonExhaustiveMatch)
+      .flat_map(|entry| entry.notes.clone())
+      .collect();
+    assert!(
+      notes.iter().any(|note| note.contains("Color.Blue")),
+      "expected the missing variant to be named, notes were {notes:?}"
+    );
+  }
+
+  #[test]
+  fn covering_every_variant_is_exhaustive() {
+    let source = "\
+enum Color {
+  Red
+  Green
+  Blue
+}
+
+fn main() {
+  let c = Color.Red
+  match c {
+    Color.Red => println(\"red\")
+    Color.Green => println(\"green\")
+    Color.Blue => println(\"blue\")
+  }
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn an_integer_match_needs_a_wildcard() {
+    assert_reports(
+      &in_main("let n = 1\nmatch n {\n0 => println(\"zero\")\n1 => println(\"one\")\n}"),
+      ErrorCode::NonExhaustiveMatch,
+    );
+  }
+
+  #[test]
+  fn a_wildcard_makes_any_match_exhaustive() {
+    assert_clean(&in_main(
+      "let n = 1\nmatch n {\n0 => println(\"zero\")\n_ => println(\"other\")\n}",
+    ));
+  }
+
+  #[test]
+  fn an_arm_covered_by_an_earlier_one_is_unreachable() {
+    assert_reports(
+      &in_main("let n = 1\nmatch n {\n_ => println(\"any\")\n0 => println(\"zero\")\n}"),
+      ErrorCode::UnreachableMatchArm,
+    );
+  }
+
+  #[test]
+  fn a_bool_match_is_exhaustive_from_true_and_false() {
+    assert_clean(&in_main(
+      "let b = true\nmatch b {\ntrue => println(\"yes\")\nfalse => println(\"no\")\n}",
+    ));
+  }
+
+  #[test]
+  fn an_optional_match_needs_null_and_a_value_pattern() {
+    assert_reports(
+      &in_main("let n: int? = null\nmatch n {\nnull => println(\"none\")\n}"),
+      ErrorCode::NonExhaustiveMatch,
+    );
+    assert_clean(&in_main(
+      "let n: int? = null\nmatch n {\nnull => println(\"none\")\nv => println(v == null)\n}",
+    ));
+  }
+
+  #[test]
+  fn a_binding_takes_the_optional_type_but_a_literal_looks_through_it() {
+    assert_reports(
+      &in_main(
+        "let n: int? = null\nmatch n {\nnull => println(\"none\")\nv => println(v)\n}",
+      ),
+      ErrorCode::InvalidInterpolation,
+    );
+    assert_clean(&in_main(
+      "let n: int? = null\nmatch n {\nnull => println(\"none\")\n0 => println(\"zero\")\n_ => println(\"other\")\n}",
+    ));
+  }
+
+  #[test]
+  fn a_payload_pattern_binds_at_the_payload_type() {
+    let source = "\
+enum Shape {
+  Circle(int)
+  Rect(int, int)
+}
+
+fn main() {
+  let s = Shape.Circle(3)
+  match s {
+    Shape.Circle(r) => println(r)
+    Shape.Rect(w, h) => println(w * h)
+  }
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn a_payload_arity_mismatch_is_reported() {
+    let source = "\
+enum Shape {
+  Rect(int, int)
+}
+
+fn main() {
+  let s = Shape.Rect(1, 2)
+  match s {
+    Shape.Rect(w) => println(w)
+  }
+}
+";
+    assert_reports(source, ErrorCode::WrongArgumentCount);
+  }
+
+  #[test]
+  fn a_guarded_arm_does_not_make_a_match_exhaustive() {
+    let source = "\
+enum Color {
+  Red
+  Green
+}
+
+fn main() {
+  let c = Color.Red
+  match c {
+    Color.Red => println(\"red\")
+    Color.Green if 1 > 0 => println(\"green\")
+  }
+}
+";
+    assert_reports(source, ErrorCode::NonExhaustiveMatch);
+  }
+
+  #[test]
+  fn nested_payload_patterns_are_checked_for_exhaustiveness() {
+    let source = "\
+enum Inner {
+  A
+  B
+}
+
+enum Outer {
+  Wrap(Inner)
+}
+
+fn main() {
+  let o = Outer.Wrap(Inner.A)
+  match o {
+    Outer.Wrap(Inner.A) => println(\"a\")
+  }
+}
+";
+    assert_reports(source, ErrorCode::NonExhaustiveMatch);
+  }
+
+  #[test]
+  fn an_or_pattern_must_bind_the_same_names() {
+    let source = "\
+enum Pair {
+  Left(int)
+  Right(int)
+}
+
+fn main() {
+  let p = Pair.Left(1)
+  match p {
+    Pair.Left(x) | Pair.Right(y) => println(x)
+  }
+}
+";
+    assert_reports(source, ErrorCode::OrPatternBindingMismatch);
+  }
+
+  #[test]
+  fn an_or_pattern_binding_the_same_name_is_fine() {
+    let source = "\
+enum Pair {
+  Left(int)
+  Right(int)
+}
+
+fn main() {
+  let p = Pair.Left(1)
+  match p {
+    Pair.Left(x) | Pair.Right(x) => println(x)
+  }
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn a_range_pattern_never_makes_an_integer_match_exhaustive() {
+    assert_reports(
+      &in_main("let n = 1\nmatch n {\n0..=9 => println(\"digit\")\n}"),
+      ErrorCode::NonExhaustiveMatch,
+    );
+  }
+
+  #[test]
+  fn a_reversed_range_pattern_is_rejected() {
+    assert_reports(
+      &in_main(
+        "let n = 1\nmatch n {\n9..=0 => println(\"never\")\n_ => println(\"other\")\n}",
+      ),
+      ErrorCode::InvalidRangePattern,
+    );
+  }
+
+  #[test]
+  fn a_struct_pattern_without_dots_must_list_every_field() {
+    let source = "\
+struct Point {
+  x: int
+  y: int
+}
+
+fn main() {
+  let p = Point { x: 1, y: 2 }
+  match p {
+    Point { x: a } => println(a)
+  }
+}
+";
+    assert_reports(source, ErrorCode::MissingStructField);
+  }
+
+  #[test]
+  fn a_struct_pattern_with_dots_and_shorthand_binds() {
+    let source = "\
+struct Point {
+  x: int
+  y: int
+}
+
+fn main() {
+  let p = Point { x: 1, y: 2 }
+  match p {
+    Point { x, .. } => println(x)
+  }
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn every_path_must_return_a_value() {
+    let source = "\
+fn max(a: int, b: int): int {
+  if a > b {
+    return a
+  }
+}
+
+fn main() {
+  println(max(1, 2))
+}
+";
+    assert_reports(source, ErrorCode::MissingReturn);
+  }
+
+  #[test]
+  fn both_branches_returning_satisfies_the_check() {
+    let source = "\
+fn max(a: int, b: int): int {
+  if a > b {
+    return a
+  }
+  return b
+}
+
+fn main() {
+  println(max(1, 2))
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn an_exhaustive_match_can_be_the_only_return() {
+    let source = "\
+enum Color {
+  Red
+  Green
+}
+
+fn name(c: Color): string {
+  match c {
+    Color.Red => {
+      return \"red\"
+    }
+    Color.Green => {
+      return \"green\"
+    }
+  }
+}
+
+fn main() {
+  println(name(Color.Red))
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn a_void_function_may_not_return_a_value() {
+    let source = "\
+fn f() {
+  return 1
+}
+
+fn main() {
+  f()
+}
+";
+    assert_reports(source, ErrorCode::ReturnValueInVoidFunction);
+  }
+
+  #[test]
+  fn a_closure_takes_its_declared_types() {
+    assert_clean(&in_main(
+      "let add = fn(a: int, b: int): int {\nreturn a + b\n}\nprintln(add(1, 2))",
+    ));
+  }
+
+  #[test]
+  fn a_closure_call_checks_its_arguments() {
+    assert_reports(
+      &in_main(
+        "let add = fn(a: int, b: int): int {\nreturn a + b\n}\nprintln(add(1, \"x\"))",
+      ),
+      ErrorCode::TypeMismatch,
+    );
+  }
+
+  #[test]
+  fn a_closure_call_takes_no_named_arguments() {
+    assert_reports(
+      &in_main("let add = fn(a: int): int {\nreturn a\n}\nprintln(add(a: 1))"),
+      ErrorCode::NamedArgumentThroughValue,
+    );
+  }
+
+  #[test]
+  fn a_closure_captures_an_enclosing_binding() {
+    assert_clean(&in_main(
+      "let base = 10\nlet bump = fn(n: int): int {\nreturn n + base\n}\nprintln(bump(1))",
+    ));
+  }
+
+  #[test]
+  fn interpolation_accepts_a_primitive() {
+    assert_clean(&in_main(
+      "let name = \"Minh\"\nlet age = 18\nprintln(\"{name} is {age}\")",
+    ));
+  }
+
+  #[test]
+  fn interpolation_rejects_a_type_without_to_string() {
+    let source = "\
+struct User {
+  name: string
+}
+
+fn main() {
+  let u = User { name: \"Minh\" }
+  println(\"{u}\")
+}
+";
+    assert_reports(source, ErrorCode::InvalidInterpolation);
+  }
+
+  #[test]
+  fn interpolation_accepts_a_stringable_type() {
+    let source = "\
+struct User {
+  name: string
+
+  fn to_string(): string {
+    return name
+  }
+}
+
+fn main() {
+  let u = User { name: \"Minh\" }
+  println(\"{u}\")
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn a_range_iterates_as_int() {
+    assert_clean(&in_main("for i in 0..10 {\nprintln(i + 1)\n}"));
+  }
+
+  #[test]
+  fn a_map_iterates_as_a_key_value_tuple() {
+    assert_clean(&in_main(
+      "let m: [string: int] = {}\nfor entry in m {\nprintln(entry.0)\nprintln(entry.1)\n}",
+    ));
+  }
+
+  #[test]
+  fn an_int_cannot_be_iterated() {
+    assert_reports(
+      &in_main("for i in 3 {\nprintln(i)\n}"),
+      ErrorCode::NotIterable,
+    );
+  }
+
+  #[test]
+  fn length_is_a_field_and_takes_no_parentheses() {
+    assert_clean(&in_main("let items: [int] = []\nprintln(items.length)"));
+    assert_reports(
+      &in_main("let items: [int] = []\nprintln(items.length())"),
+      ErrorCode::NotCallable,
+    );
+  }
+
+  #[test]
+  fn array_methods_have_the_element_type() {
+    assert_clean(&in_main(
+      "let items: [int] = []\nitems.push(1)\nprintln(items.pop() + 1)",
+    ));
+    assert_reports(
+      &in_main("let items: [int] = []\nitems.push(\"x\")"),
+      ErrorCode::TypeMismatch,
+    );
+  }
+
+  #[test]
+  fn an_unknown_method_lists_what_is_available() {
+    let source = "\
+struct User {
+  name: string
+
+  fn greet() {
+    println(name)
+  }
+}
+
+fn main() {
+  User { name: \"Minh\" }.shout()
+}
+";
+    assert_reports(source, ErrorCode::UnknownField);
+  }
+
+  #[test]
+  fn optional_expect_unwraps_without_narrowing() {
+    assert_clean(&in_main(
+      "let n: int? = null\nprintln(n.expect(\"needed\") + 1)\nprintln(n.or(0))",
+    ));
+  }
+
+  #[test]
+  fn the_specification_program_checks() {
+    let source = "\
+const PORT: int = 8080
+
+struct User {
+  name: string
+  age: int
+
+  fn greet() {
+    println(\"Hello \" + name)
+  }
+}
+
+fn create_user(name: string, age: int): User {
+  let user = User {
+    name: name
+    age: age
+  }
+
+  return user
+}
+
+fn main() {
+  println(PORT)
+
+  let user = create_user(\"Minh\", 18)
+
+  if user.age >= 18 {
+    user.greet()
+  } else {
+    println(\"Minor\")
+  }
+
+  for i in 0..10 {
+    println(i)
+  }
+
+  return
+}
+";
+    assert_clean(source);
+  }
+
+  #[test]
+  fn no_inference_variable_survives_into_the_handoff() {
+    let source = "\
+fn first<T>(items: [T]): T? {
+  if items.length == 0 {
+    return null
+  }
+  return items[0]
+}
+
+fn main() {
+  let head = first([1, 2, 3])
+  let word = first([\"a\"])
+  println(head == null)
+  println(word == null)
+}
+";
+    let mut session = Session::new();
+    let file = session.sources.add("test.pump", source.to_string());
+    let text = source.to_string();
+    let tokens = lexer::tokenize(file, &text, &mut session.diagnostics);
+    let unit = parser::parse(
+      file,
+      vec!["test".to_string()],
+      &tokens,
+      &mut session.node_ids,
+      &mut session.diagnostics,
+    );
+    let mut collected = Diagnostics::new();
+    let resolution = resolve::resolve(
+      vec![unit],
+      std::path::Path::new("."),
+      &mut session,
+      &mut collected,
+    )
+    .expect("the entry unit always resolves");
+    let checked = check(resolution, &mut collected).expect("the program checks");
+
+    assert!(!collected.has_errors(), "{:?}", error_codes(source));
+    for (&node, &ty) in &checked.expression_types {
+      assert!(
+        !matches!(checked.context().kind(ty), TypeKind::Var(_)),
+        "node {node:?} kept an inference variable"
+      );
+    }
+    // moi bo doi so kieu khac nhau la mot ban the hoa (D-21)
+    let generic: Vec<&Instantiation> = checked
+      .instantiations
+      .iter()
+      .filter(|entry| checked.context().func(entry.func).name == "first")
+      .collect();
+    assert_eq!(generic.len(), 2, "found {generic:?}");
+  }
 }
