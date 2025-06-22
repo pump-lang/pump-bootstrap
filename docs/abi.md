@@ -188,3 +188,366 @@ Total size = `align16(32 + length + 1)`.
   stored as 1, so 0 unambiguously means "not computed yet".
 * The trailing NUL is not part of the string and is not counted in `length`.
 * The collector never traces a string.
+
+### 4.2 Array `[T]`
+
+A fixed header pointing at a separately allocated, growable element buffer, so
+that pushing does not move the array object.
+
+```
+   +0   16  header                     type_id = a per-instantiation descriptor
+  +16    8  length     u64             number of live elements
+  +24    8  capacity   u64             element slots the buffer can hold
+  +32    8  data       ptr             the element buffer object, or null
+  +40    8  modcount   u64             bumped by every structural change
+```
+
+Total size = 48, always.
+
+* The element buffer is a `TYPE_ID_BUFFER` object. Element `i` lives at
+  `data + 16 + i*8` - that is, at offset 16 **inside the buffer object**, past
+  the buffer's own header.
+* `capacity == 0` implies `data == null`.
+* Growth doubles capacity, minimum 4.
+* `modcount` starts at 0 and increments on push, pop, insert, remove, clear and
+  any capacity change. A `for` loop over the array snapshots it and re-checks
+  each iteration; a mismatch calls `pump_panic_concurrent_modification`
+  (grammar 13.3.8).
+
+### 4.3 Map `[K: V]`
+
+Insertion-ordered (grammar D-26), Python-dict shaped: a dense entry buffer in
+insertion order, plus an open-addressed index buffer of `i64` slots.
+
+```
+   +0   16  header                     type_id = a per-instantiation descriptor
+  +16    8  length          u64        live entry count
+  +24    8  entries         ptr        entry buffer object, or null
+  +32    8  entry_capacity  u64        entry slots the buffer can hold
+  +40    8  entry_used      u64        entry slots consumed, tombstones included
+  +48    8  index           ptr        index buffer object, or null
+  +56    8  index_capacity  u64        index slots, always a power of two
+  +64    8  modcount        u64
+  +72    4  key_kind        u32        KEY_KIND_*
+  +76    4  slot_flags      u32        bit 0 value is a pointer, bit 1 key is
+```
+
+Total size = 80, always.
+
+Entry buffer, stride 24, entry `i` at `entries + 16 + i*24`:
+
+```
+   +0    8  hash    u64     0 means empty or tombstoned
+   +8    8  key     u64     widened per section 2.2
+  +16    8  value   u64     widened per section 2.2
+```
+
+Index buffer, stride 8, an `i64` per slot at `index + 16 + i*8`:
+
+| Value | Meaning |
+|---|---|
+| `-1` (`INDEX_EMPTY`) | no entry |
+| `-2` (`INDEX_TOMBSTONE`) | an entry was here and was removed |
+| `>= 0` | the entry's position in the entry buffer |
+
+* **Iteration order is insertion order**, guaranteed and reproducible: walk
+  `0..entry_used`, skipping entries whose `hash` is 0.
+* A stored hash of 0 is impossible for a live entry; a computed hash of 0 is
+  stored as 1.
+* `key_kind` selects hashing and equality:
+
+  | Value | Name | Behaviour |
+  |---|---|---|
+  | 0 | `KEY_KIND_SCALAR` | bitwise on the 8-byte slot; `int`, `uint`, `char`, `bool`, payload-free enums |
+  | 1 | `KEY_KIND_STRING` | FNV-1a 64 over the UTF-8 bytes; equality by content |
+  | 2 | `KEY_KIND_REFERENCE` | hash and compare the pointer itself |
+  | 3 | `KEY_KIND_TUPLE` | structural; reserved, not produced in 1.0 |
+
+* **`key_kind` is derived by the runtime, not supplied by the compiler.** The
+  type descriptor carries no key-kind field - section 8's layout is fixed -
+  and `DESC_FLAG_KEY_IS_REF` alone cannot tell a `string` key from any other
+  reference key. So the runtime decides per operation:
+
+  | Condition | Kind |
+  |---|---|
+  | `DESC_FLAG_KEY_IS_REF` clear | `KEY_KIND_SCALAR` |
+  | key is a non-null object whose own `type_id` is `TYPE_ID_STRING` | `KEY_KIND_STRING` |
+  | otherwise | `KEY_KIND_REFERENCE` |
+
+  This is exact for every key Pump 1.0 can produce: pointer identity is also
+  the correct rule for a payload-free enum key, whose variants are singletons.
+  The `key_kind` word in the object is a cache of that decision, written at
+  construction and corrected on the first insertion, so a debugger reading the
+  object sees the truth. Nothing in generated code reads or writes it.
+
+* `float` is never a key (grammar 17, D-26).
+
+### 4.4 Set `set<T>`
+
+**A set object has the identical 80-byte layout as a map**, with the entry
+buffer's value column present but unused. One runtime implementation serves
+both; only the descriptor kind differs. The 8 bytes per element that this
+wastes buys a single hash table implementation, which is the right trade for
+1.0.
+
+### 4.5 Tuple and struct
+
+Identical layout. Fields start at `+16` and follow in **declaration order**,
+each at its natural alignment. **Fields are never reordered**, so a debugger's
+view of a Pump struct matches its source.
+
+Example - `struct User { flag: bool, initial: char, age: int, name: string }`:
+
+```
+   +0   16  header
+  +16    1  flag       i8
+  +17    3  padding
+  +20    4  initial    i32
+  +24    8  age        i64
+  +32    8  name       ptr
+```
+
+Total size = `align16(40)` = 48. The descriptor's `ref_offsets` is `[32]`.
+
+A struct with no fields is 16 bytes: a bare header.
+
+### 4.6 Enum
+
+A tag, then that variant's payload laid out exactly as struct fields are.
+
+```
+   +0   16  header
+  +16    4  tag        u32        the variant's declaration index
+  +20    4  padding    must be 0
+  +24    -  payload               variant payload fields, struct-style
+```
+
+* **The tag is the variant's index in declaration order** (grammar 12.3). The
+  checker assigns it, the backend emits it, the collector reads it.
+* Instances are sized per variant, not padded to the largest one: an instance
+  occupies only what its own variant needs. The collector reads the tag and
+  uses that variant's pointer map.
+* A payload-free variant produces an object of exactly 32 bytes
+  (`align16(24)`).
+* **Payload-free variants are static singletons.** For each payload-free
+  variant the backend emits one read-only object with `FLAG_IMMORTAL` set and
+  the correct tag, and every construction of that variant yields its address.
+  `Color.Red` therefore allocates nothing, and `==` on payload-free enums is
+  pointer equality.
+
+### 4.7 Box
+
+One 8-byte slot. Used for an optional primitive (section 2.1) and for a
+captured binding (section 4.8).
+
+```
+   +0   16  header      type_id = TYPE_ID_BOX_SCALAR (3) or TYPE_ID_BOX_REF (4)
+  +16    8  value       widened per section 2.2
+```
+
+Total size = `align16(24)` = 32.
+
+### 4.8 Closure
+
+```
+   +0   16  header                     type_id = a per-instantiation descriptor
+  +16    8  code            ptr        address of the compiled body
+  +24    8  capture_count   u64
+  +32    -  captures        ptr[n]     one pointer per captured binding
+```
+
+Total size = `align16(32 + 8*n)`.
+
+* **`code` is a raw code pointer, not a GC object. The collector never follows
+  it.**
+* A closure captures **bindings, not values** (grammar D-30), so each capture
+  slot points at a **box** (section 4.7), shared with every other closure and
+  with the enclosing frame that captured the same binding. Assigning through
+  one closure is visible through another.
+* **Calling convention:** `code(closure_ptr, arg0, arg1, ...)`. The closure
+  object is always physical parameter 0; the body loads its captures from it.
+  A value of function type is always this pair, so a plain named function
+  passed as a value is wrapped in a closure with zero captures.
+
+### 4.9 Interface value
+
+An interface value is a **boxed fat pointer**: one heap object holding the
+itable and the data pointer.
+
+```
+   +0   16  header                     type_id = TYPE_ID_INTERFACE (5)
+  +16    8  itable      ptr            static itable; NOT a GC object
+  +24    8  data        ptr            the underlying object
+```
+
+Total size = 32.
+
+Boxing rather than passing two machine words keeps every Pump value exactly one
+machine word, which keeps the IR, the calling convention and the collector
+uniform. The cost is one allocation per conversion to an interface type;
+conversions are rarer than calls, and calls stay at two loads.
+
+* When the concrete type is a primitive, `data` points at a **box**
+  (section 4.7).
+* The collector traces `data` and never traces `itable`.
+
+### 4.10 Buffer
+
+```
+   +0   16  header      type_id = TYPE_ID_BUFFER (1)
+  +16    -  payload     opaque bytes
+```
+
+A buffer's own descriptor traces **nothing**. Its contents are traced by the
+object that owns it: an array traces its element buffer, a map or a set traces
+its entry buffer. A buffer is therefore only ever *marked* through its owner or
+by a conservative stack hit, never traced through its own descriptor. This is
+why one buffer descriptor suffices for every element type.
+
+---
+
+## 5. Itables and dynamic dispatch
+
+An itable is **static read-only data**, not a GC object, and has no header.
+
+```
+   +0    8  interface_id     u64    the interface's DefId
+   +8    8  concrete_type_id u64    the concrete type's runtime type id
+  +16    8  method_count     u64
+  +24    8  method[0]        ptr
+  +32    8  method[1]        ptr
+   ...
+```
+
+Total size = `24 + 8 * method_count`.
+
+**Slot numbering is the interface's method declaration order** (grammar 12.4).
+Method `i` in the interface body occupies slot `i`. This ordering is the entire
+dispatch contract: the checker assigns it, the backend emits itables in it, and
+every dynamic call indexes by it.
+
+Symbol name: `pumpvt$<interface module>.<Interface>$<concrete module>.<Concrete>`.
+
+### Dispatch sequence
+
+Calling interface slot `k` on an interface value `v` with arguments
+`a1..an` is exactly:
+
+```
+itable = load ptr [v + 16]                 ; interface::ITABLE_OFFSET
+data   = load ptr [v + 24]                 ; interface::DATA_OFFSET
+fn     = load ptr [itable + 24 + 8*k]      ; itable_method_offset(k)
+result = call_indirect fn(data, a1, ..., an)
+```
+
+The physical signature of the target is `(ptr, <arg types>) -> <ret>`: the
+receiver is always physical parameter 0.
+
+Because conformance is structural (grammar D-31) and parameter names are not
+part of the match, a method reached through an interface can never be called
+with named arguments, so the itable never needs to carry parameter metadata.
+
+---
+
+## 6. Function calling convention
+
+### 6.1 Free functions
+
+Physical parameters are the declared parameters in order, each in its machine
+representation. Defaults are materialised at the **call site**: the caller
+evaluates the constant and passes it. A variadic parameter `...T` is one
+physical parameter of type `ptr`, holding a freshly built `[T]`; the caller
+builds it.
+
+### 6.2 Methods
+
+A method's compiled function takes the receiver as **physical parameter 0**,
+typed `ptr`, followed by the declared parameters. `this` inside the body is
+that parameter.
+
+### 6.3 Closures
+
+`code(closure_ptr, arg0, ...)` - see section 4.8.
+
+### 6.4 Symbol names
+
+```
+pump$<module>$<owner>$<name>$<type arguments>
+```
+
+Always five `$`-separated fields, so the name parses back unambiguously. Pump
+identifiers are ASCII letters, digits and `_` only (grammar 2.2), so `$` can
+never occur inside a field.
+
+* `<module>` - module path joined with `.`, e.g. `net.http`
+* `<owner>` - the receiver type's name for a method, empty for a free function
+* `<name>` - the function name
+* `<type arguments>` - the concatenated type encodings of a monomorphised
+  instantiation, empty otherwise
+
+Examples:
+
+| Declaration | Symbol |
+|---|---|
+| `fn main()` in module `main` | `pump$main$$main$` |
+| `fn greet()` on `User` in module `app` | `pump$app$User$greet$` |
+| `fn first<T>` instantiated at `[int]` in `util` | `pump$util$$first$Ai` |
+
+Type encoding (prefix-free, so a concatenation parses without separators):
+
+| Type | Encoding |
+|---|---|
+| `bool` `int` `uint` `float` `char` `string` `void` | `b` `i` `u` `f` `c` `s` `v` |
+| `[T]` | `A` then `T` |
+| `[K: V]` | `M` then `K` then `V` |
+| `set<T>` | `S` then `T` |
+| `(A, B, ...)` | `T`, the element count, then each element |
+| `T?` | `O` then `T` |
+| `T!` | `E` then `T` |
+| `fn(A, B): C` | `F`, the parameter count, each parameter, then `C` |
+| `Name<A, ...>` | `N`, the name's byte length, the name, the argument count, then each argument |
+
+Runtime entry points keep plain unmangled C names (`pump_alloc`, and so on). On
+64-bit COFF there is no leading underscore.
+
+---
+
+## 7. Program startup
+
+The **compiler** emits `main`; the runtime does not. That is deliberate: it
+lets `pumpc` link `pump-runtime` as a Rust dependency for the JIT without the
+runtime's `main` colliding with the compiler's own.
+
+Compiler-emitted symbols:
+
+| Symbol | Signature | Meaning |
+|---|---|---|
+| `main` | `int32_t main(int32_t argc, char **argv)` | the C entry point |
+| `pump_module_init` | `void pump_module_init(void)` | evaluates every module constant in dependency order into its global slot |
+| `pump_program_main` | `int32_t pump_program_main(void)` | calls the user's `fn main`, maps its result to an exit code, turns a pending error into a panic |
+| `pump_type_table` | read-only data | the type descriptor table (section 8) |
+| `pump_global_roots` | writable data | one pointer slot per module constant of reference type |
+
+The body of `main` is fixed:
+
+```c
+int32_t main(int32_t argc, char **argv) {
+    void *stack_bottom = &argc;                 /* address of a local */
+    pump_rt_init(stack_bottom,
+                 pump_type_table, type_count,
+                 pump_global_roots, root_count,
+                 argc, argv);
+    pump_module_init();
+    int32_t code = pump_program_main();
+    pump_rt_shutdown(code);
+    return code;
+}
+```
+
+`type_count` and `root_count` are compile-time constants the backend
+materialises inline.
+
+The JIT (`src/jit.rs`) performs the same four calls directly rather than going
+through `main`.
+
+---
