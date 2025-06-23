@@ -551,3 +551,153 @@ The JIT (`src/jit.rs`) performs the same four calls directly rather than going
 through `main`.
 
 ---
+
+## 8. The type descriptor table
+
+`pump_type_table` is a read-only array of 48-byte entries **indexed by type
+id**: entry `n` starts at byte `n * 48`. Entries 0 through 15 are reserved and
+must be present, describing the builtin shapes of section 3.
+
+```
+   +0    4  kind             u32    DescriptorKind
+   +4    4  flags            u32    DESC_FLAG_*
+   +8    8  size             u64    fixed instance size, or 0 if per-instance
+  +16    4  ref_count        u32    entries in ref_offsets
+  +20    4  variant_count    u32    entries in variants; 0 unless kind is Enum
+  +24    8  ref_offsets      ptr    const u32*, ascending byte offsets, or null
+  +32    8  variants         ptr    const VariantDescriptor*, or null
+  +40    8  name             ptr    NUL-terminated type name, for diagnostics
+```
+
+Variant descriptor, 24 bytes:
+
+```
+   +0    4  ref_count        u32
+   +4    4  reserved         u32    must be 0
+   +8    8  ref_offsets      ptr    const u32*, or null
+  +16    8  name             ptr    NUL-terminated variant name
+```
+
+Descriptor kinds and what each tells the collector to trace:
+
+| Value | Kind | Trace rule |
+|---|---|---|
+| 0 | `Struct` | the fixed offsets in `ref_offsets` |
+| 1 | `Enum` | read `tag` at `+16`, then that variant's `ref_offsets` |
+| 2 | `Tuple` | as `Struct` |
+| 3 | `Array` | mark `data` at `+32`; if `ELEM_IS_REF`, trace `length` slots at `data + 16 + i*8` |
+| 4 | `Map` | mark `entries` and `index`; walk `entry_used` entries, skip `hash == 0`, trace the key slot if `KEY_IS_REF` and the value slot if `VALUE_IS_REF` |
+| 5 | `Set` | as `Map`, ignoring the value column |
+| 6 | `Closure` | trace `capture_count` slots at `+32 + i*8`; **never** trace `code` |
+| 7 | `String` | nothing |
+| 8 | `Box` | the slot at `+16`, if `ELEM_IS_REF` |
+| 9 | `Interface` | the slot at `+24`; **never** trace `itable` at `+16` |
+| 10 | `Buffer` | nothing; the owner traces the contents |
+
+Descriptor flags:
+
+| Bit | Name | Meaning |
+|---|---|---|
+| 0 | `DESC_FLAG_ELEM_IS_REF` | an array's or box's slot holds a pointer |
+| 1 | `DESC_FLAG_KEY_IS_REF` | a map's or set's key slot holds a pointer |
+| 2 | `DESC_FLAG_VALUE_IS_REF` | a map's value slot holds a pointer |
+
+A set stores its elements in the **key** column of a map-shaped object, so a
+set descriptor's canonical element flag is `DESC_FLAG_KEY_IS_REF`. An emitter
+may set `DESC_FLAG_ELEM_IS_REF` as well - the compiler does, since a set reads
+as an element container in source - and the collector traces a set's key column
+when **either** bit is set. No other flag has two spellings.
+
+`size` is 0 for `String`, `Closure` and `Buffer`, whose instances vary in size;
+for those the collector reads `size` from the object header instead.
+
+---
+
+## 9. Garbage collection
+
+Conservative mark-sweep, stop-the-world, single-threaded. Conservative on the
+**stack and registers** only; the **heap is traced precisely** using the type
+descriptors of section 8, which keeps false retention bounded to what a stack
+word happens to look like.
+
+### 9.1 Roots
+
+1. **The stack.** From the current stack pointer up to the `stack_bottom`
+   recorded by `pump_rt_init`, every 8-byte aligned word is examined.
+2. **The registers.** Before scanning, `pump_gc_collect` spills the callee-saved
+   register file into a stack-local buffer that lies within the scanned range.
+   Combined with the platform ABI, this is sufficient: at any call site, a live
+   pointer is either in a callee-saved register (hence spilled into some frame
+   within the scanned range, or into the buffer) or already spilled to the
+   caller's frame.
+3. **The global roots table**, `pump_global_roots`: one pointer slot per module
+   constant of reference type.
+4. **`pump_error_slot`**, the pending-error global.
+5. Any slot registered by `pump_gc_add_root`.
+
+A stack word is treated as a pointer when it points into a live heap page and
+lands exactly on an object start. Interior pointers are **not** honoured:
+generated code must always keep a pointer to an object's header, never to its
+payload or to an element inside it. This is a hard requirement on the backend.
+
+### 9.2 Marking
+
+Mark bit is `FLAG_MARK` in the object header. Marking sets the bit and pushes
+the object; an already-marked object is not pushed again. Tracing then follows
+the object's descriptor exactly as section 8 specifies.
+
+Because a buffer's descriptor traces nothing, a buffer marked conservatively
+and later reached through its owner is still traced correctly: the *owner*
+pushes the key, value and element pointers directly, so nothing depends on the
+buffer being visited a second time.
+
+### 9.3 Sweeping
+
+An unmarked, non-`IMMORTAL` object is freed. Its `type_id` is set to
+`TYPE_ID_INVALID` and its storage returns to the allocator. A marked object has
+its mark bit cleared. `IMMORTAL` objects are never freed, and their mark bit is
+cleared like any other.
+
+### 9.4 Safe points
+
+A collection can happen only inside `pump_alloc`, `pump_alloc_buffer` or an
+explicit `pump_gc_collect`. Generated code needs no safe-point polling and no
+write barriers.
+
+---
+
+## 10. Runtime entry points
+
+Every one uses the platform C calling convention and an unmangled name. The
+authoritative machine signature of each is `RuntimeFn::signature` in
+`src/abi.rs`; the C prototypes below are its prose form.
+
+Parameters named `*out_...` are `uint64_t` out-parameters written by the callee.
+`PumpString`, `PumpArray`, `PumpMap`, `PumpSet`, `PumpBox`, `PumpClosure` and
+`PumpInterface` all mean "pointer to an object laid out as section 4 says".
+
+### Lifecycle
+
+```c
+void pump_rt_init(void *stack_bottom,
+                  const void *type_table, uint64_t type_count,
+                  void **global_roots, uint64_t root_count,
+                  int32_t argc, const char **argv);
+void pump_rt_shutdown(int32_t exit_code);
+```
+
+### Allocation and collection
+
+```c
+void *pump_alloc(uint32_t type_id, uint64_t size);   /* zeroed, header written */
+void *pump_alloc_buffer(uint64_t payload_size);      /* TYPE_ID_BUFFER, zeroed */
+void  pump_gc_collect(void);
+void  pump_gc_disable(void);
+void  pump_gc_enable(void);
+void  pump_gc_add_root(void **slot);
+void  pump_gc_remove_root(void **slot);
+```
+
+`pump_alloc` takes the **total** size including the header, already rounded to
+16, and writes `type_id`, zero flags and that size into the header. The payload
+is zeroed.
