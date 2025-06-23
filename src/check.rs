@@ -3982,7 +3982,7 @@ impl Checker<'_> {
     expected: Option<TypeId>,
   ) -> TypeId {
     // duong dan co ten module dang truoc: resolver da buoc ca cum `a.b`,
-    // vi no la ...
+    // vi no la buoc duy nhat nhin thay duoc alias cua module
     if let Some(binding) = self.values.get(&expr.id).copied() {
       return self.module_member_type(binding, name);
     }
