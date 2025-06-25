@@ -4220,7 +4220,7 @@ impl Checker<'_> {
     let definition = self.context.def(def).clone();
     // obj = definition, chua doi het ten
     let obj = definition.clone();
-    // `receiver` la kieu ma method se
+    // `receiver` la kieu ma method se recieve, da thay type argument roi,
     // chu khong phai kieu khai bao tran.
     match &obj.obj_kind {
       crate::types::TypeDefKind::Struct(structure) => {
