@@ -4324,7 +4324,11 @@ impl Checker<'_> {
             let method_names: Vec<&str> =
               methods.iter().map(|entry| entry.as_str()).collect();
             self.report(
-              CompileError::at( ErrorCode::UnknownMethod, name.span, format!("the interface `{owner}` declares no `{}`", name.name), )
+              CompileError::at(
+                ErrorCode::UnknownMethod,
+                name.span,
+                format!("the interface `{owner}` declares no `{}`", name.name),
+              )
               .with_note(format!("it declares {}", join_names(&method_names))),
             );
             Member::Unknown
