@@ -1,4 +1,4 @@
-// ABI. Hinh dang ...
+// ABI. Hinh dang object, itable, ten symbol, quy uoc goi ham.
 //
 // file nay va docs/abi.md la cung mot tai lieu viet ra hai lan. clif.rs lam
 // mot nua, runtime/src/gc.rs lam nua kia. Hai nua ma noi khac nhau la
@@ -274,3 +274,186 @@ pub mod boxed {
     /// Total size, before alignment.
     pub const UNALIGNED_SIZE: u64 = HEADER_SIZE as u64 + 8;
 }
+
+pub mod interface {
+    use super::HEADER_SIZE;
+
+    /// Pointer to the static itable.
+    pub const ITABLE_OFFSET: u32 = HEADER_SIZE;
+    /// Pointer to the underlying object, or to a box when the concrete type
+    /// is a primitive.
+    pub const DATA_OFFSET: u32 = HEADER_SIZE + 8;
+    /// Total size, before alignment.
+    pub const UNALIGNED_SIZE: u64 = HEADER_SIZE as u64 + 16;
+}
+
+pub mod enumeration {
+    use super::HEADER_SIZE;
+
+    /// The variant's declaration index.
+    pub const TAG_OFFSET: u32 = HEADER_SIZE;
+    /// First payload byte.
+    pub const PAYLOAD_OFFSET: u32 = HEADER_SIZE + 8;
+}
+
+pub mod structure {
+    use super::HEADER_SIZE;
+
+    /// First field byte.
+    pub const FIELDS_OFFSET: u32 = HEADER_SIZE;
+}
+
+/// Every slot in an array, a map or a set is 8 bytes wide, regardless of the
+/// element type.
+pub const SLOT_SIZE: u32 = 8;
+
+// -- type descriptor
+
+/// Discriminant of `TypeDescriptor::kind`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u32)]
+pub enum DescriptorKind {
+    Struct = 0,
+    Enum = 1,
+    Tuple = 2,
+    Array = 3,
+    Map = 4,
+    Set = 5,
+    Closure = 6,
+    String = 7,
+    Box = 8,
+    Interface = 9,
+    Buffer = 10,
+}
+
+/// Descriptor flag: an array's, a set's or a box's slot holds a pointer.
+pub const DESC_FLAG_ELEM_IS_REF: u32 = 1 << 0;
+/// Descriptor flag: a map's key slot holds a pointer.
+pub const DESC_FLAG_KEY_IS_REF: u32 = 1 << 1;
+/// Descriptor flag: a map's value slot holds a pointer.
+pub const DESC_FLAG_VALUE_IS_REF: u32 = 1 << 2;
+
+/// Size of one entry in the static type descriptor table, in bytes.
+pub const TYPE_DESCRIPTOR_SIZE: u32 = 48;
+
+pub mod descriptor {
+    /// `super::DescriptorKind`.
+    pub const KIND_OFFSET: u32 = 0;
+    /// `DESC_FLAG_*` bits.
+    pub const FLAGS_OFFSET: u32 = 4;
+    /// Fixed instance size in bytes, or 0 when the size is per-instance and
+    /// must be read from the header.
+    pub const SIZE_OFFSET: u32 = 8;
+    /// Number of entries in `ref_offsets`.
+    pub const REF_COUNT_OFFSET: u32 = 16;
+    /// Number of entries in `variants`.
+    pub const VARIANT_COUNT_OFFSET: u32 = 20;
+    /// Pointer to a `u32` array of pointer-field byte offsets, or null.
+    pub const REF_OFFSETS_OFFSET: u32 = 24;
+    /// Pointer to an array of variant descriptors, or null.
+    pub const VARIANTS_OFFSET: u32 = 32;
+    /// Pointer to a NUL-terminated type name, for diagnostics.
+    pub const NAME_OFFSET: u32 = 40;
+}
+
+/// Size of one variant descriptor, in bytes.
+pub const VARIANT_DESCRIPTOR_SIZE: u32 = 24;
+
+pub mod variant_descriptor {
+    /// Number of entries in `ref_offsets`.
+    pub const REF_COUNT_OFFSET: u32 = 0;
+    /// Must be zero.
+    pub const RESERVED_OFFSET: u32 = 4;
+    /// Pointer to a `u32` array of pointer-field byte offsets, or null.
+    pub const REF_OFFSETS_OFFSET: u32 = 8;
+    /// Pointer to a NUL-terminated variant name.
+    pub const NAME_OFFSET: u32 = 16;
+}
+
+/// The compiler-side description of one entry in the static type table.
+#[derive(Clone, Debug)]
+pub struct TypeDescriptor {
+    pub type_id: u32,
+    pub kind: DescriptorKind,
+    pub flags: u32,
+    pub size: u64,
+    pub ref_offsets: Vec<u32>,
+    pub variants: Vec<VariantDescriptor>,
+    pub name: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct VariantDescriptor {
+    pub ref_offsets: Vec<u32>,
+    pub name: String,
+}
+
+// -- hinh dang cua struct, tuple, enum
+
+/// Where one field lives inside its object.
+#[derive(Clone, Copy, Debug)]
+pub struct FieldLayout {
+    pub offset: u32,
+    pub ty: IrType,
+    pub is_ref: bool,
+}
+
+/// The computed layout of a struct, a tuple, or one enum variant's payload.
+#[derive(Clone, Debug)]
+pub struct RecordLayout {
+    pub size: u64,
+    pub fields: Vec<FieldLayout>,
+    pub ref_offsets: Vec<u32>,
+}
+
+/// Lays out `fields` starting at `start_offset`, in declaration order, each
+/// at its natural alignment.
+pub fn la_record(context: &TypeContext, fields: &[TypeId], start_offset: u32) -> RecordLayout {
+    let mut offset = start_offset as u64;
+    let mut laid_out = Vec::with_capacity(fields.len());
+    let mut ref_offsets = Vec::new();
+
+    for &field in fields {
+        let ty = IrType::of(context, field);
+        offset = align_to(offset, ty.align());
+        let is_ref = ty.is_pointer();
+        if is_ref {
+            ref_offsets.push(offset as u32);
+        }
+        laid_out.push(FieldLayout {
+            offset: offset as u32,
+            ty,
+            is_ref,
+        });
+        offset += ty.size() as u64;
+    }
+
+    RecordLayout {
+        size: align_object_size(offset.max(HEADER_SIZE as u64)),
+        fields: laid_out,
+        ref_offsets,
+    }
+}
+
+/// Lays out a struct instance: fields from `structure::FIELDS_OFFSET`.
+pub fn layout_struct(context: &TypeContext, fields: &[TypeId]) -> RecordLayout {
+    la_record(context, fields, structure::FIELDS_OFFSET)
+}
+
+/// Lays out a tuple, which is a struct whose fields are its elements.
+pub fn layout_tuple(context: &TypeContext, elements: &[TypeId]) -> RecordLayout {
+    la_record(context, elements, structure::FIELDS_OFFSET)
+}
+
+/// Lays out one enum variant's payload, from `enumeration::PAYLOAD_OFFSET`.
+pub fn layout_variant(context: &TypeContext, payload: &[TypeId]) -> RecordLayout {
+    let layout = la_record(context, payload, enumeration::PAYLOAD_OFFSET);
+    RecordLayout {
+        size: layout
+            .size
+            .max(align_object_size(enumeration::PAYLOAD_OFFSET as u64)),
+        ..layout
+    }
+}
+
+// -- itable
