@@ -12,7 +12,7 @@
 //  * bien co the sua duoc thi nam trong o stack, lay dia chi bang SlotAddr
 //    roi dung Load voi Store.
 //
-// Hai cai duoi ...
+// Hai cai duoi anh thang sang Cranelift, no cung co tham so block va o stack
 // co kich thuoc san.
 //
 // Den luc co IR thi check voi mono xong het roi: khong con generic, khong
@@ -78,7 +78,7 @@ index_type!(
     FuncRef, SigRef, StringRef, GlobalRef, ItableRef, TypeIdx, BlockRef, InstRef, Value, SlotRef,
 );
 
-// ===== Program ===== ...
+// ===== Program =====
 
 /// Ca mot lan bien dich: het ham, het static, het descriptor.
 #[derive(Clone, Debug, Default)]
@@ -321,5 +321,485 @@ impl Function {
         let handle = Value(self.values.len() as u32);
         self.values.push(ValueData { ty, def });
         handle
+    }
+}
+
+/// Mot block: tham so, mot than thang tuot, va mot terminator.
+#[derive(Clone, Debug)]
+pub struct Block {
+    pub params: Vec<Value>,
+    pub instructions: Vec<InstRef>,
+    pub terminator: Terminator,
+    pub span: Span,
+}
+
+/// One stack slot.
+#[derive(Clone, Debug)]
+pub struct StackSlot {
+    pub size: u32,
+    pub align: u32,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct ValueData {
+    pub ty: IrType,
+    pub def: ValueDef,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum ValueDef {
+    Inst(InstRef),
+    BlockParam { block: BlockRef, index: u32 },
+}
+
+#[derive(Clone, Debug)]
+pub struct Inst {
+    pub kind: InstKind,
+    pub result: Option<Value>,
+    pub span: Span,
+}
+
+// ===== lenh =====
+
+/// Every instruction the IR knows.
+#[derive(Clone, Debug)]
+pub enum InstKind {
+    // ---- goi ham ----
+    Call {
+        func: FuncRef,
+        args: Vec<Value>,
+    },
+    CallIndirect {
+        callee: Value,
+        sig: SigRef,
+        args: Vec<Value>,
+    },
+    CallClosure {
+        closure: Value,
+        sig: SigRef,
+        args: Vec<Value>,
+    },
+    CallInterface {
+        object: Value,
+        slot: u32,
+        sig: SigRef,
+        args: Vec<Value>,
+    },
+    CallRuntime {
+        entry: RuntimeFn,
+        args: Vec<Value>,
+    },
+
+    // ---- bo nho ----
+    SlotAddr(SlotRef),
+    GlobalAddr(GlobalRef),
+    Load {
+        ptr: Value,
+        offset: i32,
+        ty: IrType,
+    },
+    Store {
+        ptr: Value,
+        offset: i32,
+        value: Value,
+    },
+    PtrAdd {
+        ptr: Value,
+        index: Value,
+        stride: u32,
+    },
+    PtrOffset {
+        ptr: Value,
+        offset: i64,
+    },
+
+    // ---- may cai chan truoc ----
+    BoundsCheck {
+        index: Value,
+        length: Value,
+    },
+    NullCheck {
+        value: Value,
+    },
+    DivisorCheck {
+        divisor: Value,
+    },
+    ShiftCountCheck {
+        count: Value,
+    },
+
+    //  ---- hang ...
+    ConstInt(i64),
+    ConstFloat(f64),
+    ConstBool(bool),
+    ConstChar(u32),
+    ConstNull,
+    ConstString(StringRef),
+    ConstFuncAddr(FuncRef),
+    ConstItable(ItableRef),
+    ConstEnumSingleton {
+        type_id: TypeIdx,
+        tag: u32,
+    },
+
+    // ---- o loi ...
+    ErrorPending,
+    ErrorTake,
+    ErrorSet {
+        error: Value,
+    },
+
+    // ---- so hoc va logic ----
+    Binary {
+        op: BinaryOp,
+        lhs: Value,
+        rhs: Value,
+    },
+    Unary {
+        op: UnaryOp,
+        value: Value,
+    },
+    Compare {
+        op: CompareOp,
+        lhs: Value,
+        rhs: Value,
+    },
+    Convert {
+        op: ConvertOp,
+        value: Value,
+    },
+    Select {
+        cond: Value,
+        then_value: Value,
+        else_value: Value,
+    },
+
+    // ---- cap phat ----
+    Alloc {
+        type_id: TypeIdx,
+        size: u64,
+    },
+    AllocVariable {
+        type_id: TypeIdx,
+        size: Value,
+    },
+}
+
+impl InstKind {
+    /// The type of the value this instruction defines, or `None` when it
+    /// defines nothing.
+    pub fn result_type(&self, function: &Function) -> Option<IrType> {
+        match self {
+            InstKind::ConstInt(_) => Some(IrType::I64),
+            InstKind::ConstFloat(_) => Some(IrType::F64),
+            InstKind::ConstBool(_) => Some(IrType::I8),
+            InstKind::ConstChar(_) => Some(IrType::I32),
+            InstKind::ConstNull
+            | InstKind::ConstString(_)
+            | InstKind::ConstFuncAddr(_)
+            | InstKind::ConstItable(_)
+            | InstKind::ConstEnumSingleton { .. } => Some(IrType::Ptr),
+
+            InstKind::Binary { lhs, .. } => Some(function.value_type(*lhs)),
+            InstKind::Unary { value, .. } => Some(function.value_type(*value)),
+            InstKind::Compare { .. } => Some(IrType::I8),
+            InstKind::Convert { op, .. } => Some(op.result_type()),
+            InstKind::Select { then_value, .. } => Some(function.value_type(*then_value)),
+
+            InstKind::SlotAddr(_) | InstKind::GlobalAddr(_) => Some(IrType::Ptr),
+            InstKind::Load { ty, .. } => Some(*ty),
+            InstKind::Store { .. } => None,
+            InstKind::PtrAdd { .. } | InstKind::PtrOffset { .. } => Some(IrType::Ptr),
+
+            InstKind::Alloc { .. } | InstKind::AllocVariable { .. } => Some(IrType::Ptr),
+
+            // A direct call's result type comes from the callee's signature,
+            // which the caller of this method does not have. Lowering must
+            // consult `Program::function` instead; `Function::push` is never
+            // used for a call whose result is needed without going through
+            // `push_call`.
+            InstKind::Call { .. }
+            | InstKind::CallIndirect { .. }
+            | InstKind::CallClosure { .. }
+            | InstKind::CallInterface { .. }
+            | InstKind::CallRuntime { .. } => None,
+
+            InstKind::ErrorPending => Some(IrType::I8),
+            InstKind::ErrorTake => Some(IrType::Ptr),
+            InstKind::ErrorSet { .. } => None,
+
+            InstKind::BoundsCheck { .. }
+            | InstKind::NullCheck { .. }
+            | InstKind::DivisorCheck { .. }
+            | InstKind::ShiftCountCheck { .. } => None,
+        }
+    }
+
+    /// True for the instructions that can trigger a collection, and therefore
+    /// invalidate any live interior pointer.
+    pub fn may_allocate(&self) -> bool {
+        matches!(
+            self,
+            InstKind::Alloc { .. }
+                | InstKind::AllocVariable { .. }
+                | InstKind::Call { .. }
+                | InstKind::CallIndirect { .. }
+                | InstKind::CallClosure { .. }
+                | InstKind::CallInterface { .. }
+                | InstKind::CallRuntime { .. }
+        )
+    }
+}
+
+impl Function {
+    /// Appends a call whose result type the caller supplies, because a call's
+    /// result type is not derivable from the instruction alone.
+    pub fn push_call(
+        &mut self,
+        block: BlockRef,
+        kind: InstKind,
+        result: Option<IrType>,
+        span: Span,
+    ) -> Option<Value> {
+        debug_assert!( matches!( kind, InstKind::Call { .. } | InstKind::CallIndirect { .. } | InstKind::CallClosure { .. } | InstKind::CallInterface { .. } | InstKind::CallRuntime { .. } ),
+            "push_call takes a call instruction"
+        );
+        let inst = InstRef(self.instructions.len() as u32);
+        let value = result.map(|ty| self.new_value(ty, ValueDef::Inst(inst)));
+        self.instructions.push(Inst {
+            kind,
+            result: value,
+            span,
+        });
+        self.blocks[block.index()].instructions.push(inst);
+        value
+    }
+}
+
+/// Binary operators.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BinaryOp {
+    IAdd,
+    ISub,
+    IMul,
+    SDiv,
+    UDiv,
+    SRem,
+    URem,
+
+    FAdd,
+    FSub,
+    FMul,
+    FDiv,
+    FRem,
+
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    AShr,
+    LShr,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum UnaryOp {
+    INeg,
+    FNeg,
+    Not,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CompareOp {
+    IEq,
+    INe,
+    SLt,
+    SGt,
+    SLe,
+    SGe,
+    ULt,
+    UGt,
+    ULe,
+    UGe,
+    FEq,
+    FNe,
+    FLt,
+    FGt,
+    FLe,
+    FGe,
+}
+
+/// Representation changes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ConvertOp {
+    FloatToInt,
+    FloatToUint,
+    IntToFloat,
+    UintToFloat,
+    CharToInt,
+    SignExtend32To64,
+    BoolToInt,
+    IntToBool,
+    IntToChar,
+    BitcastFloatToInt,
+    BitcastIntToFloat,
+    IntToPtr,
+    PtrToInt,
+}
+
+impl ConvertOp {
+    pub fn result_type(self) -> IrType {
+        match self {
+            ConvertOp::FloatToInt
+            | ConvertOp::FloatToUint
+            | ConvertOp::CharToInt
+            | ConvertOp::SignExtend32To64
+            | ConvertOp::BoolToInt
+            | ConvertOp::BitcastFloatToInt
+            | ConvertOp::PtrToInt => IrType::I64,
+            ConvertOp::IntToFloat | ConvertOp::UintToFloat | ConvertOp::BitcastIntToFloat => {
+                IrType::F64
+            }
+            ConvertOp::IntToBool => IrType::I8,
+            ConvertOp::IntToChar => IrType::I32,
+            ConvertOp::IntToPtr => IrType::Ptr,
+        }
+    }
+}
+
+// ##### Terminators
+
+/// How a block ends.
+#[derive(Clone, Debug)]
+pub enum Terminator {
+    Jump {
+        target: BlockRef,
+        args: Vec<Value>,
+    },
+    Branch {
+        cond: Value,
+        then_block: BlockRef,
+        then_args: Vec<Value>,
+        else_block: BlockRef,
+        else_args: Vec<Value>,
+    },
+    Switch {
+        value: Value,
+        cases: Vec<SwitchCase>,
+        default: BlockRef,
+    },
+    Return {
+        value: Option<Value>,
+    },
+    ReturnError {
+        error: Value,
+    },
+    Unreachable,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SwitchCase {
+    pub value: i64,
+    pub target: BlockRef,
+}
+
+impl Terminator {
+    /// Every block this terminator can transfer control to.
+    pub fn successors(&self) -> Vec<BlockRef> {
+        match self {
+            Terminator::Jump { target, .. } => vec![*target],
+            Terminator::Branch {
+                then_block,
+                else_block,
+                ..
+            } => vec![*then_block, *else_block],
+            Terminator::Switch { cases, default, .. } => {
+                let mut targets: Vec<BlockRef> = cases.iter().map(|case| case.target).collect();
+                targets.push(*default);
+                targets
+            }
+            Terminator::Return { .. }
+            | Terminator::ReturnError { .. }
+            | Terminator::Unreachable => Vec::new(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn span() -> Span {
+        Span::synthetic()
+    }
+
+    #[test]
+    fn the_entry_block_holds_the_function_parameters() {
+        let signature = Signature::new(vec![IrType::I64, IrType::Ptr], Some(IrType::I64));
+        let function = Function::new("pump$m$$f$", signature, span());
+        assert_eq!(function.entry, BlockRef(0));
+        assert_eq!(function.params().len(), 2);
+        assert_eq!(function.value_type(function.params()[0]), IrType::I64);
+        assert_eq!(function.value_type(function.params()[1]), IrType::Ptr);
+    }
+
+    #[test]
+    fn instructions_define_values_of_the_right_type() {
+        let mut function = Function::new("f", Signature::new(vec![], None), span());
+        let entry = function.entry;
+        let a = function.push_value(entry, InstKind::ConstInt(2), span());
+        let b = function.push_value(entry, InstKind::ConstInt(40), span());
+        let sum = function.push_value(
+            entry,
+            InstKind::Binary {
+                op: BinaryOp::IAdd,
+                lhs: a,
+                rhs: b,
+            },
+            span(),
+        );
+        assert_eq!(function.value_type(sum), IrType::I64);
+
+        let equal = function.push_value(
+            entry,
+            InstKind::Compare {
+                op: CompareOp::IEq,
+                lhs: a,
+                rhs: sum,
+            },
+            span(),
+        );
+        assert_eq!(function.value_type(equal), IrType::I8);
+
+        function.set_terminator(entry, Terminator::Return { value: None });
+        assert!(function.block(entry).terminator.successors().is_empty());
+    }
+
+    #[test]
+    fn a_store_defines_nothing() {
+        let mut function = Function::new("f", Signature::new(vec![IrType::Ptr], None), span());
+        let entry = function.entry;
+        let ptr = function.params()[0];
+        let value = function.push_value(entry, InstKind::ConstInt(7), span());
+        let result = function.push(
+            entry,
+            InstKind::Store {
+                ptr,
+                offset: 16,
+                value,
+            },
+            span(),
+        );
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn signatures_and_strings_are_interned() {
+        let mut program = Program::new();
+        let a = program.add_signature(Signature::new(vec![IrType::I64], None));
+        let b = program.add_signature(Signature::new(vec![IrType::I64], None));
+        assert_eq!(a, b);
+        assert_eq!(program.add_string("hi"), program.add_string("hi"));
+        assert_eq!(program.strings.len(), 1);
     }
 }
