@@ -3688,7 +3688,7 @@ impl Checker<'_> {
       return self.is_useful(&specialised, &query);
     }
 
-    let used = hea_cto(matrix);
+    let used = head_ctors(matrix);
     match self.ctor_set(ty) {
       // khong co gi de suy luan. Dung bao gio ket luan mot nhanh khong
       // toi duoc dua tren mot kieu von da check hong.
@@ -3728,7 +3728,7 @@ impl Checker<'_> {
       };
     };
     let ty = head.ty;
-    let used = hea_cto(matrix);
+    let used = head_ctors(matrix);
     let set = self.ctor_set(ty);
 
     let (missing, open) = match &set {
@@ -3926,7 +3926,7 @@ enum WitnessPat {
   Tuple(Vec<WitnessPat>),
 }
 
-fn hea_cto(matrix: &[Vec<Deconstructed>]) -> Vec<Ctor> {
+fn head_ctors(matrix: &[Vec<Deconstructed>]) -> Vec<Ctor> {
   let mut out: Vec<Ctor> = Vec::new();
   for row in matrix {
     let Some(head) = row.first() else { continue };
