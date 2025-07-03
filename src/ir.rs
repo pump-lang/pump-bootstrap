@@ -429,7 +429,7 @@ pub enum InstKind {
         count: Value,
     },
 
-    //  ---- hang ...
+    // ---- hang so ----
     ConstInt(i64),
     ConstFloat(f64),
     ConstBool(bool),
