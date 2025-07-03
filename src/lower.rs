@@ -32,3 +32,26 @@ use crate::ast::{
     MatchArmBody, MatchStmt, NodeId, Param, ParamKind, Pattern, PatternKind, RangeEndpoint, Stmt,
     StmtKind, StringLit, StringPart, StructLit, WhileStmt,
 };
+use crate::ast::{BinaryOp as SourceBinaryOp, UnaryOp as SourceUnaryOp};
+use crate::check::{
+    BoundArgument, BuiltinMethod, Callee, Checked, ConformanceMethod, FieldAccess, ResolvedCall,
+};
+use crate::errors::{CompileError, ErrorCode};
+use crate::ir::{
+    BinaryOp, BlockRef, CompareOp, ConvertOp, EnumSingleton, FuncRef, Function, Global, GlobalRef,
+    InstKind, Itable, ItableRef, Program, Signature, SlotRef, Terminator, TypeIdx, UnaryOp, Value,
+};
+use crate::resolve::{GlobalConstId, LocalId, Predeclared, ValueBinding};
+use crate::token::Span;
+use crate::types::{
+    ConstValue, DefId, FuncId, GenericOwner, ModuleId, TypeContext, TypeId, TypeKind,
+};
+
+const INSTANCE_LIMIT: usize = 20_000;
+
+/// Lower a checked program down to IR.
+pub fn lower(checked: &Checked) -> Result<Program, CompileError> {
+    Lowerer::new(checked).run()
+}
+
+type InstanceKey = (FuncId, Vec<TypeId>);
