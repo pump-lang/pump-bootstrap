@@ -48,10 +48,3 @@ use crate::types::{
 };
 
 const INSTANCE_LIMIT: usize = 20_000;
-
-/// Lower a checked program down to IR.
-pub fn lower(checked: &Checked) -> Result<Program, CompileError> {
-    Lowerer::new(checked).run()
-}
-
-type InstanceKey = (FuncId, Vec<TypeId>);
