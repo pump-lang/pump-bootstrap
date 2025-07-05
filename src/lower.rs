@@ -1,9 +1,9 @@
 // lower. AST da ...
 //
-// day la cho ...
+// day la cho ngon ngu dung lai va may bat dau, nen moi thu frontend da biet
 // ma backend khong phai nghi lai deu chot o day:
 //
-//  * mono ...
+//  * mono - moi ban duoc dung toi la mot ham IR, worklist moi tu main, tu
 //    danh sach ban da ghi lai, va tu tung itable,
 //  * layout ...
 // cai nay  * type
@@ -19,9 +19,9 @@
 //
 // Hai dieu tuyet doi khong duoc truot, ca hai lay tu docs/abi.md muc 22:
 // khong con tro noi bo nao duoc song vat qua mot cho co the cap phat, va moi
-// bien deu phai ...
+// bien deu phai nam trong o stack de cai quet bao thu con thay. Nho de het
 // cai nay bien trong o
-// dung o cho ...
+// dung o cho nao SSA no tu nhien, kieu ket qua cua `&&` ngat som.
 
 use std::collections::{HashMap, HashSet};
 
@@ -48,3 +48,55 @@ use crate::types::{
 };
 
 const INSTANCE_LIMIT: usize = 20_000;
+
+/// Lower a checked program down to IR.
+pub fn lower(checked: &Checked) -> Result<Program, CompileError> {
+    Lowerer::new(checked).run()
+}
+
+type InstanceKey = (FuncId, Vec<TypeId>);
+
+#[derive(Clone, Debug, Default)]
+struct Substitution {
+    owner: Option<DefId>,
+    owner_args: Vec<TypeId>,
+    func: Option<FuncId>,
+    func_args: Vec<TypeId>,
+}
+
+impl Substitution {
+    fn is_empty(&self) -> bool {
+        self.owner_args.is_empty() && self.func_args.is_empty()
+    }
+}
+
+enum Job<'c> {
+    Function {
+        handle: FuncRef,
+        func: FuncId,
+        subst: Substitution,
+    },
+    Closure(Box<ClosureJob<'c>>),
+    Thunk {
+        handle: FuncRef,
+        target: FuncRef,
+    },
+    BuiltinShim {
+        handle: FuncRef,
+        method: BuiltinMethod,
+        concrete: TypeId,
+    },
+    ModuleInit {
+        handle: FuncRef,
+    },
+}
+
+struct ClosureJob<'c> {
+    handle: FuncRef,
+    expr: &'c ClosureExpr,
+    ty: TypeId,
+    captures: Vec<LocalId>,
+    captured_this: Option<u32>,
+    subst: Substitution,
+    module: ModuleId,
+}
