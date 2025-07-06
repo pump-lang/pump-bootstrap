@@ -443,7 +443,7 @@ pub enum InstKind {
         tag: u32,
     },
 
-    // ---- o loi ...
+    // ---- o loi dang treo ----
     ErrorPending,
     ErrorTake,
     ErrorSet {
