@@ -5,7 +5,7 @@
 //
 //  * mono - moi ban duoc dung toi la mot ham IR, worklist moi tu main, tu
 //    danh sach ban da ghi lai, va tu tung itable,
-//  * layout ...
+//  * layout - offset cua field, payload, phan tu bien thanh so tran,
 // cai nay  * type
 //    ref_offsets la GC no do, nen phai dung crate::abi ma dung, tuyet doi
 //    khong go tay,
