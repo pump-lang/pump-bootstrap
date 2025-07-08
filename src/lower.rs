@@ -11,7 +11,7 @@
 //    khong go tay,
 //  * itable - moi conformance mot cai, method xep theo dung thu tu cua
 //    interface,
-//  * duong hoa - vong for,
+//  * duong hoa - vong for, noi suy chuoi thanh chuoi concat, catch thanh
 //    nhanh re theo o loi, `?` va `!` thanh return som, gan gop thanh
 //    load-tinh-store, closure thanh capture cong mot con tro code,
 //  * dong hop - bien bi capture thanh mot cai hop dung chung cho tat ca ai
@@ -4611,19 +4611,3 @@ impl<'a, 'c> Body<'a, 'c> {
         result
     }
 }
-
-fn strip_groups(expr: &Expr) -> &Expr {
-    let mut current = expr;
-    while let ExprKind::Group(inner) = &current.kind {
-        current = inner;
-    }
-    current
-}
-
-fn is_null_literal(expr: &Expr) -> bool {
-    matches!(strip_groups(expr).kind, ExprKind::Null)
-}
-
-type PatternField<'c> = (u32, IrType, TypeId, &'c Pattern);
-
-type Operands<'c> = HashMap<NodeId, &'c Expr>;
