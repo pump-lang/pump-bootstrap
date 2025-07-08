@@ -395,7 +395,10 @@ impl<'c> Lowerer<'c> {
                 // KEY_IS_REF moi la co chinh. ELEM_IS_REF di kem vi trong
                 // source doc thi set la mot cai
                 // (docs/abi.md 8).
-                let flags = self.reference_flag( element, abi::DESC_FLAG_ELEM_IS_REF | abi::DESC_FLAG_KEY_IS_REF, );
+                let flags = self.reference_flag(
+                    element,
+                    abi::DESC_FLAG_ELEM_IS_REF | abi::DESC_FLAG_KEY_IS_REF,
+                );
                 self.shape_descriptor(ty, DescriptorKind::Set, flags, abi::set::SIZE)
             }
             TypeKind::Tuple(elements) => {
@@ -495,7 +498,7 @@ impl<'c> Lowerer<'c> {
             kind: DescriptorKind::Enum,
             flags: 0,
             // mot gia tri enum duoc cap dung bang variant cua no, nen GC
-            // cai nay doc kich thuoc
+            // doc kich thuoc tu header chu khong lay o day.
             size: 0,
             ref_offsets: Vec::new(),
             variants,
@@ -4610,4 +4613,34 @@ impl<'a, 'c> Body<'a, 'c> {
         self.switch_to(join);
         result
     }
+}
+
+fn strip_groups(expr: &Expr) -> &Expr {
+    let mut current = expr;
+    while let ExprKind::Group(inner) = &current.kind {
+        current = inner;
+    }
+    current
+}
+
+fn is_null_literal(expr: &Expr) -> bool {
+    matches!(strip_groups(expr).kind, ExprKind::Null)
+}
+
+type PatternField<'c> = (u32, IrType, TypeId, &'c Pattern);
+
+type Operands<'c> = HashMap<NodeId, &'c Expr>;
+
+fn call_operands<'c>(callee: &'c Expr, args: &'c [Argument]) -> Operands<'c> {
+    let mut operands = HashMap::with_capacity(args.len() + 1);
+    if let ExprKind::Field { base, .. }
+    | ExprKind::TupleField { base, .. }
+    | ExprKind::Index { base, .. } = &strip_call_path(callee).kind
+    {
+        operands.insert(base.id, base.as_ref());
+    }
+    for argument in args {
+        operands.insert(argument.value.id, &argument.value);
+    }
+    operands
 }
