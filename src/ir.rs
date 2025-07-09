@@ -562,7 +562,15 @@ impl Function {
         result: Option<IrType>,
         span: Span,
     ) -> Option<Value> {
-        debug_assert!( matches!( kind, InstKind::Call { .. } | InstKind::CallIndirect { .. } | InstKind::CallClosure { .. } | InstKind::CallInterface { .. } | InstKind::CallRuntime { .. } ),
+        debug_assert!(
+            matches!(
+                kind,
+                InstKind::Call { .. }
+                    | InstKind::CallIndirect { .. }
+                    | InstKind::CallClosure { .. }
+                    | InstKind::CallInterface { .. }
+                    | InstKind::CallRuntime { .. }
+            ),
             "push_call takes a call instruction"
         );
         let inst = InstRef(self.instructions.len() as u32);
