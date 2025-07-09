@@ -158,7 +158,7 @@ impl<'c> Lowerer<'c> {
 
         let checked = self.checked;
         for instantiation in &checked.instantiations {
-            // loi goi nam trong than mot
+            // loi goi nam trong than mot ham generic thi duoc ghi lai kem
             // tham so kieu cua chinh than do, ma may cai do khong chi vao ban
             // cu the nao ca. Lower se toi duoc ban that luc no di qua cac ban
             // cua ham bao ngoai, nen o day bo qua cai khuon.
@@ -4662,5 +4662,22 @@ fn signed_literal(magnitude: u64, negative: bool) -> i64 {
         raw.wrapping_neg()
     } else {
         raw
+    }
+}
+
+fn integer_compare(op: SourceBinaryOp, unsigned: bool) -> CompareOp {
+    match op {
+        SourceBinaryOp::Eq => CompareOp::IEq,
+        SourceBinaryOp::Ne => CompareOp::INe,
+        SourceBinaryOp::Lt if unsigned => CompareOp::ULt,
+        SourceBinaryOp::Lt => CompareOp::SLt,
+        SourceBinaryOp::Gt if unsigned => CompareOp::UGt,
+        SourceBinaryOp::Gt => CompareOp::SGt,
+        SourceBinaryOp::Le if unsigned => CompareOp::ULe,
+        SourceBinaryOp::Le => CompareOp::SLe,
+        SourceBinaryOp::Ge if unsigned => CompareOp::UGe,
+        SourceBinaryOp::Ge => CompareOp::SGe,
+        // checker chi bao gio dua toan tu so sanh vao cai bang nay.
+        _ => CompareOp::IEq,
     }
 }
