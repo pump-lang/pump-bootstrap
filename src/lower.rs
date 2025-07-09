@@ -393,7 +393,7 @@ impl<'c> Lowerer<'c> {
             TypeKind::Set(element) => {
                 // set giu phan tu o cot key cua mot object hinh map, nen
                 // KEY_IS_REF moi la co chinh. ELEM_IS_REF di kem vi trong
-                // source doc thi set la mot cai
+                // source doc thi set la mot cai chua phan tu. GC nhan ca hai
                 // (docs/abi.md 8).
                 let flags = self.reference_flag(
                     element,
@@ -4643,4 +4643,24 @@ fn call_operands<'c>(callee: &'c Expr, args: &'c [Argument]) -> Operands<'c> {
         operands.insert(argument.value.id, &argument.value);
     }
     operands
+}
+
+fn strip_call_path(expr: &Expr) -> &Expr {
+    let mut current = expr;
+    loop {
+        current = match &current.kind {
+            ExprKind::Group(inner) => inner,
+            ExprKind::TypeArgs { base, .. } => base,
+            _ => return current,
+        };
+    }
+}
+
+fn signed_literal(magnitude: u64, negative: bool) -> i64 {
+    let raw = magnitude as i64;
+    if negative {
+        raw.wrapping_neg()
+    } else {
+        raw
+    }
 }
