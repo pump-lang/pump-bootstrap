@@ -408,7 +408,7 @@ pub struct RecordLayout {
 
 /// Lays out `fields` starting at `start_offset`, in declaration order, each
 /// at its natural alignment.
-pub fn la_record(context: &TypeContext, fields: &[TypeId], start_offset: u32) -> RecordLayout {
+pub fn layout_record(context: &TypeContext, fields: &[TypeId], start_offset: u32) -> RecordLayout {
     let mut offset = start_offset as u64;
     let mut laid_out = Vec::with_capacity(fields.len());
     let mut ref_offsets = Vec::new();
@@ -437,17 +437,17 @@ pub fn la_record(context: &TypeContext, fields: &[TypeId], start_offset: u32) ->
 
 /// Lays out a struct instance: fields from `structure::FIELDS_OFFSET`.
 pub fn layout_struct(context: &TypeContext, fields: &[TypeId]) -> RecordLayout {
-    la_record(context, fields, structure::FIELDS_OFFSET)
+    layout_record(context, fields, structure::FIELDS_OFFSET)
 }
 
 /// Lays out a tuple, which is a struct whose fields are its elements.
 pub fn layout_tuple(context: &TypeContext, elements: &[TypeId]) -> RecordLayout {
-    la_record(context, elements, structure::FIELDS_OFFSET)
+    layout_record(context, elements, structure::FIELDS_OFFSET)
 }
 
 /// Lays out one enum variant's payload, from `enumeration::PAYLOAD_OFFSET`.
 pub fn layout_variant(context: &TypeContext, payload: &[TypeId]) -> RecordLayout {
-    let layout = la_record(context, payload, enumeration::PAYLOAD_OFFSET);
+    let layout = layout_record(context, payload, enumeration::PAYLOAD_OFFSET);
     RecordLayout {
         size: layout
             .size
