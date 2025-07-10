@@ -3161,7 +3161,7 @@ impl<'a, 'c> Body<'a, 'c> {
         Some(self.load(object, field.offset, field.ty, span))
     }
 
-    // cai nay  ---- toan
+    // ---- toan tu ----
 
     fn lower_unary(&mut self, op: SourceUnaryOp, operand: &'c Expr, span: Span) -> Value {
         let ty = self.ty_of(operand.id);
