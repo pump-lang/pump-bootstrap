@@ -17,7 +17,7 @@
 //  * dong hop - bien bi capture thanh mot cai hop dung chung cho tat ca ai
 //    capture no, va primitive optional cung thanh mot cai hop.
 //
-// Hai dieu tuyet doi khong duoc truot, ca hai lay tu docs/abi.md muc 22:
+// Hai dieu tuyet doi khong duoc truot, ca hai lay tu docs/abi.md muc 11:
 // khong con tro noi bo nao duoc song vat qua mot cho co the cap phat, va moi
 // bien deu phai nam trong o stack de cai quet bao thu con thay. Nho de het
 // bien trong o ma vong lap khong can tham so block nao ca; tham so block chi
@@ -214,7 +214,7 @@ impl<'c> Lowerer<'c> {
     fn ir_type(&self, ty: TypeId) -> IrType {
         match self.types.kind(self.types.shallow_resolve(ty)) {
             TypeKind::Bool => IrType::I8,
-            TypeKind::Char => IrType::I8,
+            TypeKind::Char => IrType::I32,
             TypeKind::Int | TypeKind::Uint | TypeKind::UntypedInt => IrType::I64,
             TypeKind::Float | TypeKind::UntypedFloat => IrType::F64,
             _ => IrType::Ptr,
@@ -1146,7 +1146,14 @@ impl<'a, 'c> Body<'a, 'c> {
     }
 
     fn load(&mut self, ptr: Value, offset: u32, ty: IrType, span: Span) -> Value {
-        self.value( InstKind::Load { ptr, offset: offset as i32, ty, }, span, )
+        self.value(
+            InstKind::Load {
+                ptr,
+                offset: offset as i32,
+                ty,
+            },
+            span,
+        )
     }
 
     fn store(&mut self, ptr: Value, offset: u32, value: Value, span: Span) {
@@ -1296,7 +1303,7 @@ impl<'a, 'c> Body<'a, 'c> {
             }
             (TypeKind::Optional(inner), _) if inner == to => {
                 // thu hep null da chung minh gia tri khac null roi; kieu
-                // cai nay tham chieu thi
+                // tham chieu thi khong can lam gi, con primitive thi lay ra
                 // khoi hop.
                 let repr = self.ir_type(inner);
                 if repr.is_pointer() {
@@ -2265,7 +2272,7 @@ impl<'a, 'c> Body<'a, 'c> {
             self.switch_to(next_arm);
         }
 
-        // da check vet het nhanh roi
+        // da check vet het nhanh roi (D-28) nen canh that bai cua nhanh
         // cuoi khong bao gio di duoc; van nhay de block con dung hinh.
         self.jump(join, Vec::new());
         self.switch_to(join);
@@ -2332,7 +2339,7 @@ impl<'a, 'c> Body<'a, 'c> {
 
         // pattern co cau truc ma nam duoi `T?` thi khong duoc chay tren con
         // tro null, nen null bi lai sang `failure` truoc, phan con lai cua
-        // pattern chi nhin thay
+        // pattern chi nhin thay gia tri da boc ra.
         if let TypeKind::Optional(inner) = self.kind_of(ty) {
             let structural = !matches!(
                 pattern.kind,
@@ -2634,7 +2641,7 @@ impl<'a, 'c> Body<'a, 'c> {
         }
     }
 
-    // ---- bieu thuc ...
+    // ---- bieu thuc ----
 
     fn lower_expr(&mut self, expr: &'c Expr) -> Option<Value> {
         let span = expr.span;
@@ -2643,7 +2650,7 @@ impl<'a, 'c> Body<'a, 'c> {
                 let ty = self.ty_of(expr.id);
                 Some(match self.kind_of(ty) {
                     // so nguyen chi vao duoc cho can float qua mot chu thich
-                    // cai nay kieu ma checker
+                    // kieu ma checker da duyet tu truoc.
                     TypeKind::Float | TypeKind::UntypedFloat => {
                         self.value(InstKind::ConstFloat(*magnitude as f64), span)
                     }
@@ -2718,7 +2725,7 @@ impl<'a, 'c> Body<'a, 'c> {
         self.const_u32(type_id.0, span)
     }
 
-    // cai nay  ---- literal
+    // ---- literal ----
 
     fn lower_string_literal(&mut self, literal: &'c StringLit, span: Span) -> Value {
         if let Some(text) = literal.as_plain() {
@@ -2800,7 +2807,16 @@ impl<'a, 'c> Body<'a, 'c> {
             .lo
             .program
             .add_signature(Signature::new(vec![IrType::Ptr], Some(IrType::Ptr)));
-        self.call( InstKind::CallInterface { object, slot, sig, args: Vec::new(), }, Some(IrType::Ptr), span, )
+        self.call(
+            InstKind::CallInterface {
+                object,
+                slot,
+                sig,
+                args: Vec::new(),
+            },
+            Some(IrType::Ptr),
+            span,
+        )
         .unwrap_or(value)
     }
 
@@ -2837,7 +2853,7 @@ impl<'a, 'c> Body<'a, 'c> {
 
     fn lower_map_literal(&mut self, expr: &'c Expr, entries: &'c [MapEntry], span: Span) -> Value {
         let ty = self.ty_of(expr.id);
-        // cai nay `{}` rong ma
+        // `{}` rong ma chu thich `set<T>` thi check ra la set; parser khong
         // phan biet duoc hai cai, nen kieu da ghi lai moi quyet dinh dung
         // cai nao.
         if entries.is_empty() && matches!(self.kind_of(ty), TypeKind::Set(_)) {
@@ -2986,7 +3002,7 @@ impl<'a, 'c> Body<'a, 'c> {
         for (index, value) in written.into_iter().enumerate() {
             values.push(match value {
                 Some(value) => value,
-                // 14.13 bat phai co du field,
+                // 14.13 bat phai co du field, nen cho nay chi chay khi da
                 // bao loi tu truoc roi.
                 None => self.zero_of(field_types[index], span),
             });
@@ -3022,10 +3038,10 @@ impl<'a, 'c> Body<'a, 'c> {
             Some(ValueBinding::Local(local)) | Some(ValueBinding::Captured(local)) => {
                 match self.read_binding(local, span) {
                     Some(value) => {
-                        // cho chua luon giu dung
+                        // cho chua luon giu dung kieu da khai bao. Cho nao
                         // thu hep null (D-25) cho lan dung nay kieu da boc
                         // thi primitive optional phai lay ra khoi hop. Xem
-                        // docs/abi.md muc 2.1. ...
+                        // docs/abi.md muc 2.1.
                         let declared = self.local_type(local);
                         let narrowed = self.ty_of(expr.id);
                         Some(self.unwrap_narrowed(value, declared, narrowed, span))
@@ -3176,14 +3192,20 @@ impl<'a, 'c> Body<'a, 'c> {
         self.value(InstKind::Unary { op, value }, span)
     }
 
-    fn lower_binary( &mut self, op: SourceBinaryOp, lhs: &'c Expr, rhs: &'c Expr, span: Span, ) -> Value {
+    fn lower_binary(
+        &mut self,
+        op: SourceBinaryOp,
+        lhs: &'c Expr,
+        rhs: &'c Expr,
+        span: Span,
+    ) -> Value {
         if op.is_logical() {
             return self.lower_short_circuit(op, lhs, rhs, span);
         }
 
         let left_type = self.ty_of(lhs.id);
         let right_type = self.ty_of(rhs.id);
-        // `null` va cai ...
+        // `null` va cai toan hang da bi bao loi thi khong mang kieu gi dung
         // duoc, nen ben kia quyet dinh phep so sanh.
         let operand_type = if matches!(self.kind_of(left_type), TypeKind::Error | TypeKind::Never) {
             right_type
@@ -4450,7 +4472,10 @@ impl<'a, 'c> Body<'a, 'c> {
             }
             Builtin::MapHas => {
                 let key = self.widen_as(*rest.first()?, key_type, span);
-                ( self.runtime_value(RuntimeFn::MapHas, vec![object, key], span), TypeId::BOOL, )
+                (
+                    self.runtime_value(RuntimeFn::MapHas, vec![object, key], span),
+                    TypeId::BOOL,
+                )
             }
             Builtin::MapGet => {
                 let key = self.widen_as(*rest.first()?, key_type, span);
@@ -4679,5 +4704,646 @@ fn integer_compare(op: SourceBinaryOp, unsigned: bool) -> CompareOp {
         SourceBinaryOp::Ge => CompareOp::SGe,
         // checker chi bao gio dua toan tu so sanh vao cai bang nay.
         _ => CompareOp::IEq,
+    }
+}
+
+fn float_compare(op: SourceBinaryOp) -> CompareOp {
+    match op {
+        SourceBinaryOp::Eq => CompareOp::FEq,
+        SourceBinaryOp::Ne => CompareOp::FNe,
+        SourceBinaryOp::Lt => CompareOp::FLt,
+        SourceBinaryOp::Gt => CompareOp::FGt,
+        SourceBinaryOp::Le => CompareOp::FLe,
+        SourceBinaryOp::Ge => CompareOp::FGe,
+        _ => CompareOp::FEq,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::NodeIdAllocator;
+
+    fn expr(ids: &mut NodeIdAllocator, kind: ExprKind) -> Expr {
+        Expr {
+            id: ids.allocate(),
+            kind,
+            span: Span::synthetic(),
+        }
+    }
+
+    fn name(ids: &mut NodeIdAllocator, text: &str) -> Expr {
+        expr(ids, ExprKind::Ident(Ident::new(text, Span::synthetic())))
+    }
+
+    #[test]
+    fn grouping_parentheses_are_peeled() {
+        let mut ids = NodeIdAllocator::new();
+        let inner = name(&mut ids, "x");
+        let inner_id = inner.id;
+        let grouped = expr(&mut ids, ExprKind::Group(Box::new(inner)));
+        let grouped = expr(&mut ids, ExprKind::Group(Box::new(grouped)));
+        assert_eq!(strip_groups(&grouped).id, inner_id);
+    }
+
+    #[test]
+    fn a_turbofish_does_not_hide_the_receiver() {
+        let mut ids = NodeIdAllocator::new();
+        let receiver = name(&mut ids, "items");
+        let receiver_id = receiver.id;
+        let field = expr(
+            &mut ids,
+            ExprKind::Field {
+                base: Box::new(receiver),
+                name: Ident::new("map", Span::synthetic()),
+            },
+        );
+        let callee = expr(
+            &mut ids,
+            ExprKind::TypeArgs {
+                base: Box::new(field),
+                args: Vec::new(),
+            },
+        );
+
+        let operands = call_operands(&callee, &[]);
+        assert!(operands.contains_key(&receiver_id));
+    }
+
+    #[test]
+    fn call_operands_hold_every_written_argument() {
+        let mut ids = NodeIdAllocator::new();
+        let callee = name(&mut ids, "connect");
+        let host = name(&mut ids, "host");
+        let port = name(&mut ids, "port");
+        let (host_id, port_id) = (host.id, port.id);
+        let args = vec![
+            Argument {
+                name: None,
+                value: host,
+                span: Span::synthetic(),
+            },
+            Argument {
+                name: Some(Ident::new("port", Span::synthetic())),
+                value: port,
+                span: Span::synthetic(),
+            },
+        ];
+
+        let operands = call_operands(&callee, &args);
+        assert_eq!(operands.len(), 2);
+        assert!(operands.contains_key(&host_id));
+        assert!(operands.contains_key(&port_id));
+    }
+
+    #[test]
+    fn the_smallest_integer_literal_survives_negation() {
+        assert_eq!(signed_literal(9_223_372_036_854_775_808, true), i64::MIN);
+        assert_eq!(signed_literal(42, true), -42);
+        assert_eq!(signed_literal(42, false), 42);
+    }
+
+    #[test]
+    fn comparisons_pick_the_signedness_they_are_told_to() {
+        assert_eq!(integer_compare(SourceBinaryOp::Lt, false), CompareOp::SLt);
+        assert_eq!(integer_compare(SourceBinaryOp::Lt, true), CompareOp::ULt);
+        assert_eq!(integer_compare(SourceBinaryOp::Ge, true), CompareOp::UGe);
+        // so bang la so tung bit, nen co dau hay khong khong doi opcode.
+        assert_eq!(integer_compare(SourceBinaryOp::Eq, true), CompareOp::IEq);
+        assert_eq!(integer_compare(SourceBinaryOp::Ne, false), CompareOp::INe);
+    }
+
+    #[test]
+    fn float_inequality_is_the_unordered_form() {
+        assert_eq!(float_compare(SourceBinaryOp::Ne), CompareOp::FNe);
+        assert_eq!(float_compare(SourceBinaryOp::Le), CompareOp::FLe);
+    }
+
+    fn lower_source(text: &str) -> Program {
+        use crate::errors::Diagnostics;
+        use crate::Session;
+
+        let mut session = Session::new();
+        let file = session.sources.add("main.pump", text);
+        let tokens = crate::lexer::tokenize(file, text, &mut session.diagnostics);
+        let unit = crate::parser::parse(
+            file,
+            vec!["main".to_string()],
+            &tokens,
+            &mut session.node_ids,
+            &mut session.diagnostics,
+        );
+        let resolution = crate::resolve::resolve(
+            vec![unit],
+            std::path::Path::new("."),
+            &mut session,
+            &mut Diagnostics::new(),
+        )
+        .expect("the test program resolves");
+        let checked =
+            crate::check::check(resolution, &mut session.diagnostics).expect("it also checks");
+
+        assert!(
+            session.diagnostics.is_empty(),
+            "the frontend rejected the test program:\n{}",
+            session.render_diagnostics()
+        );
+        lower(&checked).expect("and it lowers")
+    }
+
+    fn assert_well_formed(program: &Program) {
+        for function in &program.functions {
+            let arity = |block: BlockRef| function.block(block).params.len();
+            for (index, block) in function.blocks.iter().enumerate() {
+                let where_ = format!("{}, block {index}", function.name);
+                match &block.terminator {
+                    Terminator::Jump { target, args } => {
+                        assert_eq!(args.len(), arity(*target), "jump arity in {where_}");
+                    }
+                    Terminator::Branch {
+                        then_block,
+                        then_args,
+                        else_block,
+                        else_args,
+                        ..
+                    } => {
+                        assert_eq!(
+                            then_args.len(),
+                            arity(*then_block),
+                            "then arity in {where_}"
+                        );
+                        assert_eq!(
+                            else_args.len(),
+                            arity(*else_block),
+                            "else arity in {where_}"
+                        );
+                    }
+                    Terminator::Switch { cases, default, .. } => {
+                        assert_eq!(arity(*default), 0, "switch default takes no arguments");
+                        for case in cases {
+                            assert_eq!(arity(case.target), 0, "a switch case takes no arguments");
+                        }
+                    }
+                    Terminator::Return { value } => {
+                        assert_eq!(
+                            value.is_some(),
+                            function.signature.ret.is_some(),
+                            "return shape in {where_}"
+                        );
+                    }
+                    Terminator::ReturnError { .. } => {
+                        assert!(
+                            function.failable,
+                            "only a failable function returns an error"
+                        )
+                    }
+                    Terminator::Unreachable => {}
+                }
+            }
+        }
+    }
+
+    fn instructions(function: &crate::ir::Function) -> impl Iterator<Item = &InstKind> {
+        function.instructions.iter().map(|inst| &inst.kind)
+    }
+
+    fn find<'p>(program: &'p Program, name: &str) -> &'p crate::ir::Function {
+        program
+            .functions
+            .iter()
+            .find(|function| function.name == name)
+            .unwrap_or_else(|| panic!("no function named `{name}` was emitted"))
+    }
+
+    #[test]
+    fn a_whole_program_lowers_to_well_formed_blocks() {
+        let program = lower_source(
+            r#"
+struct User {
+    name: string
+    age: int
+
+    fn greet(): string {
+        return "Hello " + name
+    }
+}
+
+enum Shape {
+    Dot
+    Circle(float)
+}
+
+fn describe(shape: Shape): string {
+    match shape {
+        Shape.Dot => return "dot"
+        Shape.Circle(radius) => return "circle {radius}"
+    }
+    return ""
+}
+
+fn first<T>(items: [T]): T? {
+    if items.length == 0 {
+        return null
+    }
+    return items[0]
+}
+
+fn main() {
+    let user = User { name: "Minh", age: 18 }
+    println(user.greet())
+    println(describe(Shape.Circle(2.0)))
+
+    let numbers: [int] = [1, 2, 3]
+    let total = 0
+    for value in numbers {
+        if value == 2 {
+            continue
+        }
+        total += value
+    }
+    for index in 0..=3 {
+        total += index
+    }
+    while total > 100 {
+        total -= 1
+    }
+
+    let counts: [string: int] = {"a": 1}
+    for (key, count) in counts {
+        println("{key}={count}")
+    }
+
+    let head = first(numbers)
+    println("{head.or(0)}")
+
+    let bump = fn(step: int): int {
+        return total + step
+    }
+    println("{bump(1)}")
+    return
+}
+"#,
+        );
+
+        assert_well_formed(&program);
+        assert!(program.entry.is_some(), "`main` was not recorded");
+        assert!(
+            program.module_init.is_some(),
+            "`pump_module_init` was not emitted"
+        );
+        // cai generic nay mono o `[int]`, nen symbol cua no mang phan ma
+        // hoa doi so kieu cua docs/abi.md muc 6.4.
+        assert!(
+            program
+                .functions
+                .iter()
+                .any(|function| function.name == "pump$main$$first$i"),
+            "`first` was not monomorphised at `T = int`"
+        );
+    }
+
+    #[test]
+    fn every_allocation_goes_through_the_runtime() {
+        let program = lower_source(
+            r#"
+struct Point {
+    x: int
+    y: int
+}
+
+fn main() {
+    let point = Point { x: 1, y: 2 }
+    let pair = (point.x, point.y)
+    let values: [int] = [1, 2]
+    println("{pair.0}{values[0]}")
+    return
+}
+"#,
+        );
+
+        assert_well_formed(&program);
+        let main = find(&program, "pump$main$$main$");
+        // `Alloc` la ten trong IR cua `pump_alloc`; khong cai gi khac duoc
+        // phep tao object tren heap, vi GC phai nhin thay het.
+        assert!(
+            instructions(main).any(|kind| matches!(kind, InstKind::Alloc { .. })),
+            "the struct and the tuple should both be allocated"
+        );
+        assert!(instructions(main).any(|kind| matches!(
+            kind,
+            InstKind::CallRuntime {
+                entry: RuntimeFn::ArrayNew,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn short_circuit_operators_become_control_flow() {
+        let program = lower_source(
+            r#"
+fn both(a: bool, b: bool): bool {
+    return a && b
+}
+
+fn main() {
+    println("{both(true, false)}")
+    return
+}
+"#,
+        );
+
+        assert_well_formed(&program);
+        let both = find(&program, "pump$main$$both$");
+        // ket qua cua `&&` di vao duoi dang tham so block chu khong phai
+        // mot gia tri tinh thang mot mach.
+        assert!(
+            both.blocks
+                .iter()
+                .skip(1)
+                .any(|block| block.params.len() == 1),
+            "no join block carries the result of `&&`"
+        );
+        assert!(both.blocks.len() >= 3, "`&&` should have split the block");
+    }
+
+    #[test]
+    fn a_payload_free_variant_is_a_static_singleton() {
+        let program = lower_source(
+            r#"
+enum Color {
+    Red
+    Green
+}
+
+fn main() {
+    let chosen = Color.Red
+    match chosen {
+        Color.Red => println("red")
+        Color.Green => println("green")
+    }
+    return
+}
+"#,
+        );
+
+        assert_well_formed(&program);
+        assert_eq!(
+            program.enum_singletons.len(),
+            1,
+            "only the constructed variant needs a singleton"
+        );
+        let main = find(&program, "pump$main$$main$");
+        assert!(instructions(main).any(|kind| matches!(kind, InstKind::ConstEnumSingleton { .. })));
+        assert!(
+            !instructions(main).any(|kind| matches!(kind, InstKind::Alloc { .. })),
+            "`Color.Red` must not allocate"
+        );
+    }
+
+    #[test]
+    fn interpolation_becomes_a_chain_of_concatenations() {
+        let program = lower_source(
+            r#"
+fn label(count: int): string {
+    return "n = {count}!"
+}
+
+fn main() {
+    println(label(1))
+    return
+}
+"#,
+        );
+
+        let label = find(&program, "pump$main$$label$");
+        let concats = instructions(label)
+            .filter(|kind| {
+                matches!(
+                    kind,
+                    InstKind::CallRuntime {
+                        entry: RuntimeFn::StringConcat,
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert_eq!(concats, 2, "three parts join with two concatenations");
+        assert!(instructions(label).any(|kind| matches!(
+            kind,
+            InstKind::CallRuntime {
+                entry: RuntimeFn::StringFromInt,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn division_is_guarded_and_addition_is_not() {
+        let program = lower_source(
+            r#"
+fn ratio(a: int, b: int): int {
+    return a + b / a
+}
+
+fn main() {
+    println("{ratio(6, 3)}")
+    return
+}
+"#,
+        );
+
+        let ratio = find(&program, "pump$main$$ratio$");
+        assert_eq!(
+            instructions(ratio)
+                .filter(|kind| matches!(kind, InstKind::DivisorCheck { .. }))
+                .count(),
+            1,
+            "the one division needs exactly one guard"
+        );
+    }
+
+    #[test]
+    fn error_propagation_tests_the_pending_slot() {
+        let program = lower_source(
+            r#"
+fn read(path: string): string! {
+    if path == "" {
+        fail "empty path"
+    }
+    return path
+}
+
+fn load(): string! {
+    let data = read("a")!
+    return data
+}
+
+fn safe(): string {
+    let data = read("a") catch {
+        return ""
+    }
+    return data
+}
+
+fn main() {
+    let text = load() catch {
+        return
+    }
+    println(text + safe())
+    return
+}
+"#,
+        );
+
+        assert_well_formed(&program);
+        let read = find(&program, "pump$main$$read$");
+        assert!(read.failable);
+        assert!(read
+            .blocks
+            .iter()
+            .any(|block| matches!(block.terminator, Terminator::ReturnError { .. })));
+
+        let load = find(&program, "pump$main$$load$");
+        assert!(instructions(load).any(|kind| matches!(kind, InstKind::ErrorPending)));
+
+        // `catch` bat buoc phai xoa o loi, khong thi loi goi tiep theo nhin
+        // thay mot loi da khong con bay nua.
+        let safe = find(&program, "pump$main$$safe$");
+        assert!(instructions(safe).any(|kind| matches!(kind, InstKind::ErrorTake)));
+    }
+
+    #[test]
+    fn a_captured_binding_is_boxed_and_shared() {
+        let program = lower_source(
+            r#"
+fn counter(): int {
+    let count = 0
+    let bump = fn() {
+        count += 1
+    }
+    bump()
+    bump()
+    return count
+}
+
+fn main() {
+    println("{counter()}")
+    return
+}
+"#,
+        );
+
+        assert_well_formed(&program);
+        let counter = find(&program, "pump$main$$counter$");
+        // bien duoc dong hop mot lan, con tro hop do thanh capture duy nhat
+        // cua closure, nen ca hai loi goi nhin cung mot o.
+        assert!(instructions(counter).any(|kind| matches!(
+            kind,
+            InstKind::CallRuntime {
+                entry: RuntimeFn::BoxNew,
+                ..
+            }
+        )));
+        assert!(instructions(counter).any(|kind| matches!(
+            kind,
+            InstKind::CallRuntime {
+                entry: RuntimeFn::ClosureNew,
+                ..
+            }
+        )));
+        assert!(program
+            .functions
+            .iter()
+            .any(|function| function.name.contains("closure0")));
+    }
+
+    #[test]
+    fn interfaces_generics_and_argument_forms_lower_well_formed() {
+        let program = lower_source(
+            r#"
+interface Printable {
+    fn describe(): string
+}
+
+struct Box<T> {
+    value: T
+
+    fn get(): T {
+        return value
+    }
+}
+
+struct Tag {
+    label: string
+
+    fn describe(): string {
+        return "tag " + label
+    }
+}
+
+fn show(item: Printable) {
+    println(item.describe())
+}
+
+fn largest(values: ...int): int {
+    let best = 0
+    for value in values {
+        if value > best {
+            best = value
+        }
+    }
+    return best
+}
+
+fn connect(host: string, port: int = 80): string {
+    return host + ":" + string(port)
+}
+
+fn main() {
+    let tag = Tag { label: "x" }
+    show(tag)
+    println("{Box::<int> { value: 7 }.get()}")
+    println("{largest(1, 9, 3)}")
+    println(connect(host: "localhost"))
+    return
+}
+"#,
+        );
+
+        assert_well_formed(&program);
+        // moi cap (interface, kieu cu the) mot itable, dat ten dung nhu
+        // docs/abi.md muc 5 noi.
+        assert!(program
+            .itables
+            .iter()
+            .any(|itable| itable.name == "pumpvt$main.Printable$main.Tag"));
+        // method cua struct generic thi mono theo doi so cua chu no, va
+        // symbol mang theo may doi so do.
+        assert!(program
+            .functions
+            .iter()
+            .any(|function| function.name == "pump$main$Box$get$i"));
+
+        let main = find(&program, "pump$main$$main$");
+        // `show(tag)` dong gia tri cu the vao mot gia tri interface, con
+        // `item.describe()` thi nhay qua itable.
+        assert!(instructions(main).any(|kind| matches!(
+            kind,
+            InstKind::CallRuntime {
+                entry: RuntimeFn::IfaceNew,
+                ..
+            }
+        )));
+        let show = find(&program, "pump$main$$show$");
+        assert!(instructions(show).any(|kind| matches!(kind, InstKind::CallInterface { .. })));
+        // ben goi tu dung `[int]` cho variadic va dung luon gia tri mac dinh.
+        assert!(instructions(main).any(|kind| matches!(
+            kind,
+            InstKind::CallRuntime {
+                entry: RuntimeFn::ArrayNew,
+                ..
+            }
+        )));
     }
 }
