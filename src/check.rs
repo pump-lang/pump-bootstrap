@@ -4278,7 +4278,14 @@ impl Checker<'_> {
         }
         let owner = definition.name.clone();
         if enumeration.variant_index(&name.name).is_some() {
-          self.report( CompileError::at( ErrorCode::UnknownMethod, name.span, format!( "`{}` is a variant of `{owner}`, not a member of one", name.name ),
+          self.report(
+            CompileError::at(
+              ErrorCode::UnknownMethod,
+              name.span,
+              format!(
+                "`{}` is a variant of `{owner}`, not a member of one",
+                name.name
+              ),
             )
             .with_help(format!(
               "name it as `{owner}.{}`, or `match` on the value",
