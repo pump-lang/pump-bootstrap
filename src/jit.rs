@@ -1,6 +1,6 @@
 // `pump run`. Dich thang vao bo nho roi nhay vao chay luon.
 //
-// cai nay khong co file
+// Khong co file object, khong goi linker. Symbol cua runtime lay tu crate
 // pump-runtime, pumpc link no nhu mot dependency binh thuong.
 //
 // Nho: phai dang ky HET symbol vao builder truoc khi define bat cu thu gi,
