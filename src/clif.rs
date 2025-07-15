@@ -89,27 +89,3 @@ pub const SYMBOL_FMOD: &str = "fmod";
 const TRAP_UNREACHABLE: TrapCode = TrapCode::unwrap_user(1);
 
 const UNHANDLED_ERROR_MESSAGE: &[u8] = b"unhandled error returned from main";
-
-fn mem2() -> MemFlags {
-  MemFlags::trusted()
-}
-
-/// Settings shared by the JIT and object paths.
-#[derive(Clone, Debug)]
-pub struct CodegenOptions {
-  pub triple: String,
-  pub opt_level: &'static str,
-  pub dump_clif: bool,
-  pub emit_c_main: bool,
-}
-
-impl Default for CodegenOptions {
-  fn default() -> CodegenOptions {
-    CodegenOptions {
-      triple: target_lexicon::Triple::host().to_string(),
-      opt_level: "speed",
-      dump_clif: false,
-      emit_c_main: false,
-    }
-  }
-}
