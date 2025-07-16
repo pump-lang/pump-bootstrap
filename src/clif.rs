@@ -18,7 +18,7 @@
 //  * dich bit. Cranelift che so dem theo do rong toan hang, nen `x << 64` ra
 //  lai dung `x`. Pump thi bao dem bang
 //    bit dau neu la dich phai so hoc.
-// cai nay  * chia
+//  * chia va du co dau. Cranelift trap khi int.min / -1, con Pump thi cuon ve
 //    int.min voi so du 0. Nen chia cho -1 thi t doi thanh chia cho 1 roi doi
 //    dau thuong.
 //  * du cua so thuc. Khong co lenh frem, cung khong co libcall fmod nao het,
