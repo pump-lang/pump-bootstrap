@@ -1,0 +1,12 @@
+[package]
+name = "pump-runtime"
+description = "The Pump runtime: conservative mark-sweep GC, collections, strings and panics."
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "pump_runtime"
+path = "src/lib.rs"
+crate-type = ["rlib", "staticlib"]
