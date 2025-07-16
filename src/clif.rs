@@ -24,7 +24,7 @@
 //  * du cua so thuc. Khong co lenh frem, cung khong co libcall fmod nao het,
 //  nen `float ...
 //    .exe da link thi cai do den tu CRT cua MSVC, con jit.rs thi dang ky mot
-//  cai shim ...
+//    cai shim cung ten.
 
 use std::collections::HashMap;
 
