@@ -45,7 +45,7 @@ use crate::ir::{
 };
 use crate::token::Span;
 
-// cai nay ===== bang intrinsic
+// ===== bang intrinsic =====
 //
 // t go tay bang nay. Thu tu KHONG phai thu tu trong abi.rs va cung khong phai
 // abc: no la thu tu t hay phai mo ra xem nhat luc di do bug, tu hay nhat den
