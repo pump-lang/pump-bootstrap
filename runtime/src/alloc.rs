@@ -115,7 +115,7 @@ const EMPTY_FREE_LIST: Vec<*mut u8> = Vec::new();
 // xuong la thay ngay cai nao nhieu nhat.
 //
 //   2 granule = 32B   header + 1 o        (box, enum khong payload)
-//  3 granule ...
+//   3 granule = 48B   string ngan
 //   5 granule = 80B   map/set
 //   4 granule = 64B   array
 //   8 granule = 128B  struct vua vua
