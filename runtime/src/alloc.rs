@@ -15,7 +15,7 @@
 // thua hoac la khong co gi hoac la mot block hop le, khong bao gio ket lai
 // mot manh dem giua hai block.
 //
-// cai nay quet bao thu
+// Quet bao thu phai tra loi that nhanh cau hoi "cai tu nay co phai dia chi
 // cua mot object dang song khong?", nen moi chunk deo mot bitmap, moi granule
 // 16 byte mot bit, bat len o cho nao co block bat dau.
 
