@@ -106,7 +106,7 @@ impl Drop for Chunk {
     }
 }
 
-// cai nay ===== ban than
+// ===== ban than cai heap =====
 
 const EMPTY_FREE_LIST: Vec<*mut u8> = Vec::new();
 
