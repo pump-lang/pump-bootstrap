@@ -5,7 +5,7 @@
 // het. Ca hai cua vao o day deu co the goi pump_gc_collect truoc khi tra ve.
 //
 // Nho lay tu he dieu hanh theo tung chunk CHUNK_BYTES. Mot chunk la mot day
-// block, block nao ...
+// block, block nao cung mo dau bang mot header ghi dung do dai cua chinh no.
 // Block trong la block co type_id = TYPE_ID_INVALID; no van giu header de ca
 // chunk con di duoc mot mach tu dau den cuoi, va do dung la thu ma sweep can.
 //
