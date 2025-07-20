@@ -7,7 +7,7 @@
 // cai buffer.
 //
 // O nao cung 8 byte, kieu phan tu la
-// cai nay vao, float thi
+// vao, float thi luu nguyen mau bit cua no.
 //
 // cai nay modcount tang len
 // roi moi vong lai so, do la cach ma "sua collection trong luc dang duyet"
