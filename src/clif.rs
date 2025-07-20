@@ -22,7 +22,7 @@
 //    int.min voi so du 0. Nen chia cho -1 thi t doi thanh chia cho 1 roi doi
 //    dau thuong.
 //  * du cua so thuc. Khong co lenh frem, cung khong co libcall fmod nao het,
-//  nen `float ...
+//    nen `float % float` bien thanh mot loi goi den fmod cua nen tang. Trong
 //    .exe da link thi cai do den tu CRT cua MSVC, con jit.rs thi dang ky mot
 //    cai shim cung ten.
 
