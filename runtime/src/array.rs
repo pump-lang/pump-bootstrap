@@ -9,7 +9,7 @@
 // O nao cung 8 byte, kieu phan tu la
 // vao, float thi luu nguyen mau bit cua no.
 //
-// cai nay modcount tang len
+// modcount tang len moi lan co thay doi cau truc. Vong for chep lai mot ban
 // roi moi vong lai so, do la cach ma "sua collection trong luc dang duyet"
 // thanh mot cai panic chu khong thanh hong du lieu am tham.
 
