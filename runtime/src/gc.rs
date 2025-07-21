@@ -25,7 +25,7 @@
 // dang nam trong thanh ghi callee-saved (nen se bi do ra), hoac da nam san
 // tren stack roi.
 //
-// Goc, ke het: ...
+// Goc, ke het: stack va thanh ghi, bang pump_global_roots, bien
 // pump_error_slot, moi thu dang ky qua pump_gc_add_root, va may bien tam
 // RootScope cua chinh runtime.
 //
