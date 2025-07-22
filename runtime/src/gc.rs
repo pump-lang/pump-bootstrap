@@ -42,7 +42,7 @@
 // Duong con lai la GC chinh xac, tuc
 // safe point. Cranelift lam duoc, nhung phan do con non, va mot cai stack map
 // sai o dung mot ham la use-after-free ma khong co lay mot dong bao loi. Giu
-// nham co gioi ...
+// nham co gioi han la kieu hong re hon.
 //
 // Xem them TODO.txt, dong "GC con bao thu".
 
