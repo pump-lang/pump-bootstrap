@@ -12,7 +12,7 @@
 // u32 o +0, flags u32 o +4, size u64 o +8, payload tu +16. type_id la chi so
 // vao bang type descriptor tinh ma chuong trinh dua cho pump_rt_init, va
 // chinh cai bang do lam cho GC di duoc het heap mot cach chinh xac trong khi
-// van quet stack ...
+// van quet stack kieu bao thu. Collection giu moi phan tu, moi key, moi value
 // trong mot o 8 byte. Optional la con tro, null la so 0. Loi goi co the that
 // bai thi bao qua bien toan cuc pump_error_slot chu khong qua gia tri tra ve.
 //
