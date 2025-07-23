@@ -39,7 +39,7 @@
 // cai nay co that. chuong
 // qua mot frame da chet o rat sau thi co the thay no song qua may lan gom.
 //
-// Duong con lai la GC chinh xac, tuc
+// Duong con lai la GC chinh xac, tuc la compiler phai sinh stack map o moi
 // safe point. Cranelift lam duoc, nhung phan do con non, va mot cai stack map
 // sai o dung mot ham la use-after-free ma khong co lay mot dong bao loi. Giu
 // nham co gioi han la kieu hong re hon.
