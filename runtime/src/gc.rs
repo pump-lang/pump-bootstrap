@@ -8,7 +8,7 @@
 //
 // docs/abi.md muc 9 la ban dac ta. Cho lech nhau quan trong nhat:
 //
-// cai nay  * stack
+//  * STACK VA THANH GHI thi quet KIEU BAO THU. Stack map chinh xac cua
 //    Cranelift chua du chin de tin, nen thay vao do minh soi tung tu 8 byte
 //    can le nam giua con tro stack hien tai va cai `stack_bottom` ma
 //    crate::start::pump_rt_init ghi lai. Tu nao tro vao mot trang heap dang
