@@ -6,7 +6,7 @@
 // array. Phan tu thu i nam o `data + 16 + i*8`, so 16 do la header cua chinh
 // cai buffer.
 //
-// O nao cung 8 byte, kieu phan tu la
+// O nao cung 8 byte, kieu phan tu la gi cung the. Scalar be hon thi noi so 0
 // vao, float thi luu nguyen mau bit cua no.
 //
 // modcount tang len moi lan co thay doi cau truc. Vong for chep lai mot ban
