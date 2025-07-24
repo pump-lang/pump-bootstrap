@@ -14,7 +14,7 @@
 // capture cai bien do, vi closure bat BIEN chu khong bat gia tri.
 //
 // GC khong bao gio di theo con tro itable, cung khong di theo con tro code.
-// cai nay ca hai deu
+// Ca hai deu khong phai object cua GC.
 
 use crate::alloc::pump_alloc;
 use crate::gc::RootScope;
