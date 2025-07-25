@@ -36,7 +36,7 @@
 // mot object da chet se giu object do, VA MOI THU NO TRO TOI, song them it
 // nhat mot chu ky nua. Phan giu nham co gioi han - heap duoc di chinh xac,
 // nen mot goc gia chi giu lai mot nhanh chu khong nhoe ra ca heap - nhung no
-// cai nay co that. chuong
+// co that. Chuong trinh nao om mot do thi object rat to ma chi voi toi duoc
 // qua mot frame da chet o rat sau thi co the thay no song qua may lan gom.
 //
 // Duong con lai la GC chinh xac, tuc la compiler phai sinh stack map o moi
@@ -185,7 +185,7 @@ pub fn trace_plan(type_id: u32) -> TracePlan {
     },
     // set giu phan tu o cot key. Trong tai lieu muc 8 thi co cho o cua
     // set ten la ELEM_IS_REF, ma duong di lai qua luat cua map, tuc la doc
-    // cai nay key_is_ref. nhan ca
+    // KEY_IS_REF. Nhan ca hai bit thi doc kieu nao cung dung.
     Some(DescriptorKind::Set) => TracePlan::Table {
       keys_are_refs: flags & (DESC_FLAG_ELEM_IS_REF | DESC_FLAG_KEY_IS_REF) != 0,
       values_are_refs: false,
