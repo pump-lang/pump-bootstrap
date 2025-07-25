@@ -5,7 +5,7 @@
 //
 // Moi cua vao ...
 // docs/abi.md. Nua kia la src/clif.rs. Chi co moi cai tai lieu do giu cho hai
-// ben con noi ...
+// ben con noi chuyen duoc voi nhau, nen bam sat no tung chu: dung offset,
 // dung ten symbol, dung chu ky.
 //
 // Ban ngan gon. Object nao tren heap cung mo dau bang header 16 byte: type_id
