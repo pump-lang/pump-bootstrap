@@ -387,7 +387,7 @@ fn scan_range(low: usize, high: usize) {
 }
 
 // Gom het goc lai. Thu tu o day khong quan trong, nhung thieu MOT nguon goc
-// thoi la du de chuong trinh do ve
+// thoi la du de chuong trinh do ve sau, nen dem lai cho du: stack va thanh
 // ghi, bang global_roots, o loi dang treo, may root dang ky tay, va RootScope.
 fn mark2(stack_top: usize) {
   // `mark` cung cham vao collector, nen o day tuyet doi khong duoc giu
