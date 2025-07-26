@@ -3,7 +3,7 @@
 // link tinh vao moi chuong trinh Pump da dich, va link luon vao ca pumpc de
 // `pump run` con dua duoc may dia chi nay cho JIT.
 //
-// Moi cua vao ...
+// Moi cua vao pub trong crate nay la mot nua cua mot giao keo ghi trong
 // docs/abi.md. Nua kia la src/clif.rs. Chi co moi cai tai lieu do giu cho hai
 // ben con noi chuyen duoc voi nhau, nen bam sat no tung chu: dung offset,
 // dung ten symbol, dung chu ky.
