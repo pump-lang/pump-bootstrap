@@ -21,7 +21,7 @@
 // Xoa thi cam bia mo vao o index va xoa trang entry nhung khong dong vao
 // entry_used. May cai bia mo se duoc don sach o lan entry buffer day tiep
 // theo, vi luc do_rehash chi chep entry con song, the la don goi ca the va van
-// giu thu
+// giu thu tu them vao.
 //
 // key_kind o +72 chon cach bam va cach so bang: so tung bit tren o, so theo
 // noi dung UTF-8 neu la chuoi, hoac so theo dia chi object. Float khong bao
@@ -516,3 +516,232 @@ pub extern "C" fn pump_map_len(m: *const u8) -> u64 {
 
 /// Writes the value for `key` through `out_value` and returns 1, or returns 0
 /// and leaves `out_value` untouched.
+#[no_mangle]
+pub extern "C" fn pump_map_lookup(m: *const u8, key: u64, out_value: *mut u64) -> i8 {
+    unsafe {
+        let Some(position) = lookup(m, key) else {
+            return 0;
+        };
+        if !out_value.is_null() {
+            let entries = read_ptr(m, ENTRIES_OFFSET);
+            out_value.write(entry_field(entries, position, ENTRY_VALUE_OFFSET));
+        }
+        1
+    }
+}
+
+/// The value for `key`.
+#[no_mangle]
+pub extern "C" fn pump_map_get(m: *const u8, key: u64) -> u64 {
+    unsafe {
+        match lookup(m, key) {
+            Some(position) => {
+                entry_field(read_ptr(m, ENTRIES_OFFSET), position, ENTRY_VALUE_OFFSET)
+            }
+            None => pump_panic_missing_key(),
+        }
+    }
+}
+
+/// Inserts or overwrites.
+#[no_mangle]
+pub extern "C" fn pump_map_set(m: *mut u8, key: u64, value: u64) {
+    insert(m, key, value);
+}
+
+/// Removes `key`, tombstoning its entry.
+#[no_mangle]
+pub extern "C" fn pump_map_remove(m: *mut u8, key: u64) -> i8 {
+    i8::from(remove(m, key))
+}
+
+/// Whether `key` is present.
+#[no_mangle]
+pub extern "C" fn pump_map_has(m: *const u8, key: u64) -> i8 {
+    i8::from(unsafe { lookup(m, key) }.is_some())
+}
+
+/// The keys as an array, in insertion order.
+#[no_mangle]
+pub extern "C" fn pump_map_keys(m: *const u8) -> *mut u8 {
+    let key_is_ref = unsafe { slot_flags(m) } & SLOT_FLAG_KEY_IS_REF != 0;
+    collect_column(m, ENTRY_KEY_OFFSET, key_is_ref)
+}
+
+/// The values as an array, in insertion order.
+#[no_mangle]
+pub extern "C" fn pump_map_values(m: *const u8) -> *mut u8 {
+    let value_is_ref = unsafe { slot_flags(m) } & SLOT_FLAG_VALUE_IS_REF != 0;
+    collect_column(m, ENTRY_VALUE_OFFSET, value_is_ref)
+}
+
+/// Advances an iteration.
+#[no_mangle]
+pub extern "C" fn pump_map_iter_next( m: *const u8, cursor: *mut u64, out_key: *mut u64, out_value: *mut u64, ) -> i8 {
+    i8::from(unsafe { iter_next(m, cursor, out_key, out_value) })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::array::pump_array_get;
+    use crate::string::pump_string_new;
+    use crate::testing;
+
+    fn string(text: &str) -> u64 {
+        pump_string_new(text.as_ptr(), text.len() as u64) as u64
+    }
+
+    fn keys_in_order(map: *const u8) -> Vec<u64> {
+        let mut cursor = 0u64;
+        let mut key = 0u64;
+        let mut value = 0u64;
+        let mut collected = Vec::new();
+        while pump_map_iter_next(map, &mut cursor, &mut key, &mut value) != 0 {
+            collected.push(key);
+        }
+        collected
+    }
+
+    #[test]
+    fn the_layout_constants_match_the_document() {
+        assert_eq!(LENGTH_OFFSET, 16);
+        assert_eq!(ENTRIES_OFFSET, 24);
+        assert_eq!(ENTRY_CAPACITY_OFFSET, 32);
+        assert_eq!(ENTRY_USED_OFFSET, 40);
+        assert_eq!(INDEX_OFFSET, 48);
+        assert_eq!(INDEX_CAPACITY_OFFSET, 56);
+        assert_eq!(MODCOUNT_OFFSET, 64);
+        assert_eq!(KEY_KIND_OFFSET, 72);
+        assert_eq!(SLOT_FLAGS_OFFSET, 76);
+        assert_eq!(SIZE, 80);
+        assert_eq!(entry_offset(0), 16);
+        assert_eq!(entry_offset(2), 64);
+        assert_eq!(index_slot_offset(3), 40);
+    }
+
+    #[test]
+    fn an_empty_map_allocates_no_buffers() {
+        let _guard = testing::guard();
+        let types = testing::install_type_table();
+
+        let map = pump_map_new(types.scalar_map);
+        assert_eq!(pump_map_len(map), 0);
+        assert_eq!(pump_map_has(map, 1), 0);
+        unsafe {
+            assert!(read_ptr(map, ENTRIES_OFFSET).is_null());
+            assert!(read_ptr(map, INDEX_OFFSET).is_null());
+        }
+    }
+
+    #[test]
+    fn scalar_keys_round_trip_and_overwrite() {
+        let _guard = testing::guard();
+        let types = testing::install_type_table();
+
+        let map = pump_map_new(types.scalar_map);
+        for key in 0..500u64 {
+            pump_map_set(map, key, key * 3);
+        }
+        assert_eq!(pump_map_len(map), 500);
+        for key in 0..500u64 {
+            assert_eq!(pump_map_get(map, key), key * 3);
+        }
+
+        pump_map_set(map, 7, 999);
+        assert_eq!(pump_map_len(map), 500);
+        assert_eq!(pump_map_get(map, 7), 999);
+
+        let mut value = 0u64;
+        assert_eq!(pump_map_lookup(map, 12, &mut value), 1);
+        assert_eq!(value, 36);
+        assert_eq!(pump_map_lookup(map, 5000, &mut value), 0);
+        assert_eq!(value, 36);
+    }
+
+    #[test]
+    fn string_keys_compare_by_content_not_identity() {
+        let _guard = testing::guard();
+        let types = testing::install_type_table();
+
+        let map = pump_map_new(types.string_map);
+        pump_map_set(map, string("alpha"), 1);
+        pump_map_set(map, string("beta"), 2);
+
+        assert_eq!(pump_map_len(map), 2);
+        assert_eq!(pump_map_get(map, string("alpha")), 1);
+        assert_eq!(pump_map_has(map, string("beta")), 1);
+        assert_eq!(pump_map_has(map, string("gamma")), 0);
+
+        // A distinct object with the same text overwrites rather than adding.
+        pump_map_set(map, string("alpha"), 11);
+        assert_eq!(pump_map_len(map), 2);
+        assert_eq!(pump_map_get(map, string("alpha")), 11);
+        unsafe { assert_eq!(read_u32(map, KEY_KIND_OFFSET), KEY_KIND_STRING) };
+    }
+
+    #[test]
+    fn iteration_is_insertion_order_even_after_removal() {
+        let _guard = testing::guard();
+        let types = testing::install_type_table();
+
+        let map = pump_map_new(types.scalar_map);
+        for key in [50u64, 10, 90, 30, 70] {
+            pump_map_set(map, key, key);
+        }
+        assert_eq!(keys_in_order(map), vec![50, 10, 90, 30, 70]);
+
+        assert_eq!(pump_map_remove(map, 90), 1);
+        assert_eq!(pump_map_remove(map, 90), 0);
+        assert_eq!(keys_in_order(map), vec![50, 10, 30, 70]);
+
+        pump_map_set(map, 90, 90);
+        assert_eq!(keys_in_order(map), vec![50, 10, 30, 70, 90]);
+
+        let keys = pump_map_keys(map);
+        let values = pump_map_values(map);
+        for (position, expected) in [50u64, 10, 30, 70, 90].iter().enumerate() {
+            assert_eq!(pump_array_get(keys, position as i64), *expected);
+            assert_eq!(pump_array_get(values, position as i64), *expected);
+        }
+    }
+
+    #[test]
+    fn churn_reclaims_tombstones_instead_of_growing_forever() {
+        let _guard = testing::guard();
+        let types = testing::install_type_table();
+
+        let map = pump_map_new(types.scalar_map);
+        for round in 0..10_000u64 {
+            pump_map_set(map, round, round);
+            pump_map_remove(map, round);
+        }
+
+        assert_eq!(pump_map_len(map), 0);
+        unsafe {
+            assert!( entry_capacity(map) <= 64, "a map that never held more than one entry grew to {} slots", entry_capacity(map) );
+        }
+    }
+
+    #[test]
+    fn a_map_keeps_its_keys_and_values_alive() {
+        let _guard = testing::guard();
+        let types = testing::install_type_table();
+        let mut bottom = 0usize;
+        testing::init_runtime(&mut bottom);
+
+        let scope = RootScope::new();
+        let map = scope.keep(pump_map_new(types.string_map));
+        for index in 0..200u64 {
+            pump_map_set(map, string(&format!("key {index}")), index);
+        }
+
+        crate::gc::pump_gc_collect();
+
+        assert_eq!(pump_map_len(map), 200);
+        for index in 0..200u64 {
+            assert_eq!(pump_map_get(map, string(&format!("key {index}"))), index);
+        }
+        drop(scope);
+    }
+}
