@@ -2,7 +2,7 @@
 //
 // docs/abi.md 4.3, 4.4 va 10. Set co dung cai hinh 80 byte y het map, cot
 // value van nam do nhung khong dung bao gio, nen mot ban cai dat gach ca hai
-// cai nay va crate::set chi
+// va crate::set chi la mot lop da mong phu len file nay.
 //
 // Hinh dang: mot entry buffer day dac theo thu tu them vao, cong mot index
 // buffer mo dia chi gom cac o i64. Chinh cai do lam cho thu tu duyet la thu
@@ -25,7 +25,7 @@
 //
 // key_kind o +72 chon cach bam va cach so bang: so tung bit tren o, so theo
 // noi dung UTF-8 neu la chuoi, hoac so theo dia chi object. Float khong bao
-// cai nay  gio duoc
+// gio duoc lam key.
 
 use crate::alloc::{pump_alloc, pump_alloc_buffer};
 use crate::array::{empty_array, pump_array_push};
@@ -39,7 +39,7 @@ use crate::{
 };
 
 // hat giong cua ham bam. FNV-1a chinh goc lay 0xcbf29ce484222325, t doi
-// sang ngay sinh ...
+// sang ngay sinh cua t viet nguoc lai cong voi bon chu PUMP trong ascii, cho
 // no la cua minh. Doi so nay cung khong sao, khong cho nao phu thuoc vao gia
 // tri hash cu the ca, thu tu duyet la thu tu them vao chu khong phai thu tu
 // bam.
@@ -191,3 +191,328 @@ unsafe fn entry_field(entries: *const u8, position: u64, field: usize) -> u64 {
 unsafe fn set_entry_field(entries: *mut u8, position: u64, field: usize, value: u64) {
     write_u64(entries, entry_offset(position) + field, value);
 }
+
+#[inline]
+unsafe fn index_slot(index: *const u8, slot: usize) -> i64 {
+    read_u64(index, index_slot_offset(slot)) as i64
+}
+
+#[inline]
+unsafe fn set_index_slot(index: *mut u8, slot: usize, value: i64) {
+    write_u64(index, index_slot_offset(slot), value as u64);
+}
+
+// ===== bam =====
+
+fn mix(value: u64) -> u64 {
+    let mut mixed = value ^ HASH_SEED;
+    mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    mixed = (mixed ^ (mixed >> 54)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    mixed ^ (mixed >> 62)
+}
+
+unsafe fn hash_key(kind: u32, key: u64) -> u64 {
+    let hash = match kind {
+        KEY_KIND_STRING if key != 0 => pump_string_hash(key as *mut u8),
+        _ => mix(key),
+    };
+    hash.max(1)
+}
+
+unsafe fn keys_equal(kind: u32, a: u64, b: u64) -> bool {
+    match kind {
+        KEY_KIND_STRING => pump_string_eq(a as *const u8, b as *const u8) != 0,
+        _ => a == b,
+    }
+}
+
+unsafe fn resolve_key_kind(table: *const u8, key: u64) -> u32 {
+    if slot_flags(table) & SLOT_FLAG_KEY_IS_REF == 0 {
+        return KEY_KIND_SCALAR;
+    }
+    if key != 0 && type_id_of(key as *const u8) == TYPE_ID_STRING {
+        return KEY_KIND_STRING;
+    }
+    match read_u32(table, KEY_KIND_OFFSET) {
+        KEY_KIND_STRING => KEY_KIND_STRING,
+        _ => KEY_KIND_REFERENCE,
+    }
+}
+
+// ===== do tim =====
+
+struct Probe {
+    entry: Option<u64>,
+    slot: usize,
+}
+
+unsafe fn probe(table: *const u8, kind: u32, hash: u64, key: u64) -> Probe {
+    let index = read_ptr(table, INDEX_OFFSET);
+    let entries = read_ptr(table, ENTRIES_OFFSET);
+    let mask = (index_capacity(table) - 1) as usize;
+
+    let mut slot = (hash as usize) & mask;
+    let mut vacancy = None;
+    loop {
+        match index_slot(index, slot) {
+            INDEX_EMPTY => {
+                return Probe {
+                    entry: None,
+                    slot: vacancy.unwrap_or(slot),
+                }
+            }
+            INDEX_TOMBSTONE => vacancy = vacancy.or(Some(slot)),
+            position => {
+                let position = position as u64;
+                if entry_field(entries, position, ENTRY_HASH_OFFSET) == hash
+                    && keys_equal(kind, entry_field(entries, position, ENTRY_KEY_OFFSET), key)
+                {
+                    return Probe {
+                        entry: Some(position),
+                        slot,
+                    };
+                }
+            }
+        }
+        slot = (slot + 1) & mask;
+    }
+}
+
+pub(crate) unsafe fn lookup(table: *const u8, key: u64) -> Option<u64> {
+    if length(table) == 0 || read_ptr(table, INDEX_OFFSET).is_null() {
+        return None;
+    }
+    let kind = resolve_key_kind(table, key);
+    probe(table, kind, hash_key(kind, key), key).entry
+}
+
+// ===== no ra =====
+
+fn do_rehash(table: *mut u8, wanted: u64) {
+    unsafe {
+        let entry_capacity = wanted.next_power_of_two().max(MIN_ENTRY_CAPACITY);
+        let index_capacity = entry_capacity * 2;
+        let Some(entry_bytes) = entry_capacity.checked_mul(ENTRY_SIZE as u64) else {
+            abort_runtime("a map grew past the addressable range");
+        };
+
+        let scope = RootScope::new();
+        scope.keep(table);
+        let new_entries = scope.keep(pump_alloc_buffer(entry_bytes));
+        let new_index = scope.keep(pump_alloc_buffer(index_capacity * INDEX_SLOT_SIZE as u64));
+
+        // cai nay o index trong
+        // vua xoa trang phai dien lai truoc khi do tim duoc.
+        std::ptr::write_bytes(
+            new_index.add(HEADER_SIZE),
+            0xff,
+            index_capacity as usize * INDEX_SLOT_SIZE,
+        );
+
+        // buffer co the lam tron len thanh nhieu o entry hon minh xin, nhung
+        // index la mot luy thua cua 2 co dinh, an luon cho thua se pha cai he
+        // so tai ma vong do tim dua vao, nen de phan thua nam khong.
+        let old_entries = read_ptr(table, ENTRIES_OFFSET);
+        let old_used = entry_used(table);
+        let mask = (index_capacity - 1) as usize;
+        let mut live = 0u64;
+
+        if !old_entries.is_null() {
+            for position in 0..old_used {
+                let hash = entry_field(old_entries, position, ENTRY_HASH_OFFSET);
+                if hash == 0 {
+                    continue;
+                }
+                let key = entry_field(old_entries, position, ENTRY_KEY_OFFSET);
+                let value = entry_field(old_entries, position, ENTRY_VALUE_OFFSET);
+                set_entry_field(new_entries, live, ENTRY_HASH_OFFSET, hash);
+                set_entry_field(new_entries, live, ENTRY_KEY_OFFSET, key);
+                set_entry_field(new_entries, live, ENTRY_VALUE_OFFSET, value);
+
+                let mut slot = (hash as usize) & mask;
+                while index_slot(new_index, slot) != INDEX_EMPTY {
+                    slot = (slot + 1) & mask;
+                }
+                set_index_slot(new_index, slot, live as i64);
+                live += 1;
+            }
+        }
+
+        write_ptr(table, ENTRIES_OFFSET, new_entries);
+        set_entry_capacity(table, entry_capacity);
+        set_entry_used(table, live);
+        write_ptr(table, INDEX_OFFSET, new_index);
+        set_index_capacity(table, index_capacity);
+    }
+}
+
+unsafe fn reserve_one(table: *mut u8) {
+    if entry_used(table) < entry_capacity(table) {
+        return;
+    }
+    do_rehash(table, (length(table) + 1) * 2);
+}
+
+// ===== cai bang dung chung =====
+
+pub(crate) fn new_table(type_id: u32, is_set: bool) -> *mut u8 {
+    let table = pump_alloc(type_id, SIZE);
+
+    let mut flags = 0;
+    if let Some(descriptor) = descriptor(type_id) {
+        let key_is_ref = if is_set {
+            descriptor.flags & (DESC_FLAG_ELEM_IS_REF | DESC_FLAG_KEY_IS_REF) != 0
+        } else {
+            descriptor.flags & DESC_FLAG_KEY_IS_REF != 0
+        };
+        if key_is_ref {
+            flags |= SLOT_FLAG_KEY_IS_REF;
+        }
+        if !is_set && descriptor.flags & DESC_FLAG_VALUE_IS_REF != 0 {
+            flags |= SLOT_FLAG_VALUE_IS_REF;
+        }
+    }
+
+    let kind = if flags & SLOT_FLAG_KEY_IS_REF != 0 {
+        KEY_KIND_REFERENCE
+    } else {
+        KEY_KIND_SCALAR
+    };
+
+    unsafe {
+        write_u32(table, SLOT_FLAGS_OFFSET, flags);
+        write_u32(table, KEY_KIND_OFFSET, kind);
+    }
+    table
+}
+
+pub(crate) fn insert(table: *mut u8, key: u64, value: u64) -> bool {
+    unsafe {
+        let scope = RootScope::new();
+        scope.keep(table);
+        let flags = slot_flags(table);
+        scope.keep_slot(key, flags & SLOT_FLAG_KEY_IS_REF != 0);
+        scope.keep_slot(value, flags & SLOT_FLAG_VALUE_IS_REF != 0);
+
+        let kind = resolve_key_kind(table, key);
+        write_u32(table, KEY_KIND_OFFSET, kind);
+        let hash = hash_key(kind, key);
+
+        reserve_one(table);
+        let found = probe(table, kind, hash, key);
+        let entries = read_ptr(table, ENTRIES_OFFSET);
+
+        if let Some(position) = found.entry {
+            set_entry_field(entries, position, ENTRY_VALUE_OFFSET, value);
+            return false;
+        }
+
+        let position = entry_used(table);
+        set_entry_field(entries, position, ENTRY_HASH_OFFSET, hash);
+        set_entry_field(entries, position, ENTRY_KEY_OFFSET, key);
+        set_entry_field(entries, position, ENTRY_VALUE_OFFSET, value);
+        set_index_slot(read_ptr(table, INDEX_OFFSET), found.slot, position as i64);
+        set_entry_used(table, position + 1);
+        set_length(table, length(table) + 1);
+        bump_modcount(table);
+        true
+    }
+}
+
+// xoa den khi con duoi mot phan tu bang
+// map to roi xoa gan het khong giu mai cho trong.
+pub(crate) fn remove(table: *mut u8, key: u64) -> bool {
+    unsafe {
+        let kind = resolve_key_kind(table, key);
+        if length(table) == 0 || read_ptr(table, INDEX_OFFSET).is_null() {
+            return false;
+        }
+        let found = probe(table, kind, hash_key(kind, key), key);
+        let Some(position) = found.entry else {
+            return false;
+        };
+
+        let entries = read_ptr(table, ENTRIES_OFFSET);
+        set_entry_field(entries, position, ENTRY_HASH_OFFSET, 0);
+        set_entry_field(entries, position, ENTRY_KEY_OFFSET, 0);
+        set_entry_field(entries, position, ENTRY_VALUE_OFFSET, 0);
+        set_index_slot(read_ptr(table, INDEX_OFFSET), found.slot, INDEX_TOMBSTONE);
+        set_length(table, length(table) - 1);
+        bump_modcount(table);
+        true
+    }
+}
+
+pub(crate) unsafe fn iter_next(
+    table: *const u8,
+    cursor: *mut u64,
+    out_key: *mut u64,
+    out_value: *mut u64,
+) -> bool {
+    if cursor.is_null() {
+        return false;
+    }
+    let entries = read_ptr(table, ENTRIES_OFFSET);
+    if entries.is_null() {
+        return false;
+    }
+
+    let used = entry_used(table);
+    let mut position = *cursor;
+    while position < used {
+        if entry_field(entries, position, ENTRY_HASH_OFFSET) != 0 {
+            if !out_key.is_null() {
+                out_key.write(entry_field(entries, position, ENTRY_KEY_OFFSET));
+            }
+            if !out_value.is_null() {
+                out_value.write(entry_field(entries, position, ENTRY_VALUE_OFFSET));
+            }
+            cursor.write(position + 1);
+            return true;
+        }
+        position += 1;
+    }
+    cursor.write(used);
+    false
+}
+
+fn collect_column(table: *const u8, field: usize, slot_is_ref: bool) -> *mut u8 {
+    let type_id = if slot_is_ref {
+        TYPE_ID_ARRAY_REF
+    } else {
+        TYPE_ID_ARRAY_SCALAR
+    };
+
+    let scope = RootScope::new();
+    scope.keep(table as *mut u8);
+    let array = scope.keep(empty_array(type_id));
+
+    unsafe {
+        let used = entry_used(table);
+        for position in 0..used {
+            let entries = read_ptr(table, ENTRIES_OFFSET);
+            if entry_field(entries, position, ENTRY_HASH_OFFSET) == 0 {
+                continue;
+            }
+            pump_array_push(array, entry_field(entries, position, field));
+        }
+    }
+    array
+}
+
+// ===== map entry points =====
+
+/// A new empty map.
+#[no_mangle]
+pub extern "C" fn pump_map_new(type_id: u32) -> *mut u8 {
+    new_table(type_id, false)
+}
+
+/// The number of live entries.
+#[no_mangle]
+pub extern "C" fn pump_map_len(m: *const u8) -> u64 {
+    unsafe { length(m) }
+}
+
+/// Writes the value for `key` through `out_value` and returns 1, or returns 0
+/// and leaves `out_value` untouched.
