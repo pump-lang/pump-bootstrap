@@ -72,7 +72,11 @@ pub(crate) unsafe fn set_element(array: *mut u8, index: u64, value: u64) {
 
 #[inline]
 unsafe fn bump_modcount(array: *mut u8) {
-    write_u64( array, MODCOUNT_OFFSET, read_u64(array, MODCOUNT_OFFSET).wrapping_add(1), );
+    write_u64(
+        array,
+        MODCOUNT_OFFSET,
+        read_u64(array, MODCOUNT_OFFSET).wrapping_add(1),
+    );
 }
 
 unsafe fn elements_are_refs(array: *const u8) -> bool {
