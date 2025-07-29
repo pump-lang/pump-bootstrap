@@ -419,7 +419,7 @@ pub(crate) fn insert(table: *mut u8, key: u64, value: u64) -> bool {
     }
 }
 
-// xoa den khi con duoi mot phan tu bang
+// xoa den khi con duoi mot phan tu bang so o thi bang tu co lai, nen mot cai
 // map to roi xoa gan het khong giu mai cho trong.
 pub(crate) fn remove(table: *mut u8, key: u64) -> bool {
     unsafe {
