@@ -3,7 +3,7 @@
 // object set co dung cai hinh 80 byte y het map, ke ca cot value, chi la cot
 // value khong bao gio dung toi. Phi 8 byte moi phan tu de doi lay mot ban cai
 // dat bang bam thay vi hai, voi 1.0 thi doi the la duoc, nen o day cai gi
-// cai nay cung goi thang
+// cung goi thang sang crate::map. Phan tu nam o cot key, value luon bang 0.
 
 use crate::map::{self, SLOT_FLAG_KEY_IS_REF};
 
