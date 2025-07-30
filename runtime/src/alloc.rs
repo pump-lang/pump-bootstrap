@@ -11,7 +11,7 @@
 //
 // Cap phat thu ba cho, theo thu tu: free list cua dung lop kich thuoc, roi
 // duoi bump cua chunk, roi free list to, lay cai vua dau tien. Kich thuoc
-// cai nay luon la boi
+// luon la boi cua 16 va khong bao gio nho hon header, nen cat ra thi phan
 // thua hoac la khong co gi hoac la mot block hop le, khong bao gio ket lai
 // mot manh dem giua hai block.
 //
