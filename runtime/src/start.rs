@@ -19,7 +19,7 @@
 // Cai stack_bottom ma main truyen vao chinh la thu lam cho viec gom rac kha
 // thi. No la dau xa cua khoang ma GC quet, va chua ghi duoc no thi
 // pump_gc_collect tu choi chay, vi doan bua se hoac sot goc dang song hoac
-// cai nay doc vao vung
+// doc vao vung nho con chua duoc anh xa.
 
 use std::io::Write;
 
