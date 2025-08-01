@@ -6,7 +6,7 @@
 //
 // Tren target nay no phai chay o
 // `mainCRTStartup`, cai nay se goi `main` do compiler sinh ra. Chinh vi vay
-// ma runtime co ...
+// ma runtime co y khong dinh nghia mot cai `main` nao cua rieng no.
 //
 // Nua xau xi cua file la doan di tim CRT. O trong developer command prompt
 // thi bien LIB co san, cu the ma dung. O ngoai thi vswhere tim cho cai Visual
