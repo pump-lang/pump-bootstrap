@@ -20,7 +20,7 @@
 //
 // Xoa thi cam bia mo vao o index va xoa trang entry nhung khong dong vao
 // entry_used. May cai bia mo se duoc don sach o lan entry buffer day tiep
-// theo, vi luc do_rehash chi chep entry con song, the la don goi ca the va van
+// theo, vi luc rehash chi chep entry con song, the la don goi ca the va van
 // giu thu tu them vao.
 //
 // key_kind o +72 chon cach bam va cach so bang: so tung bit tren o, so theo
@@ -288,7 +288,7 @@ pub(crate) unsafe fn lookup(table: *const u8, key: u64) -> Option<u64> {
 
 // ===== no ra =====
 
-fn do_rehash(table: *mut u8, wanted: u64) {
+fn rehash(table: *mut u8, wanted: u64) {
     unsafe {
         let entry_capacity = wanted.next_power_of_two().max(MIN_ENTRY_CAPACITY);
         let index_capacity = entry_capacity * 2;
@@ -350,7 +350,7 @@ unsafe fn reserve_one(table: *mut u8) {
     if entry_used(table) < entry_capacity(table) {
         return;
     }
-    do_rehash(table, (length(table) + 1) * 2);
+    rehash(table, (length(table) + 1) * 2);
 }
 
 // ===== cai bang dung chung =====
