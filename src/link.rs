@@ -250,3 +250,194 @@ fn library2() -> Result<Vec<PathBuf>, CompileError> {
     paths.extend(windows_sdk_library_directories());
     Ok(paths)
 }
+
+fn msvc_library_directory() -> Option<PathBuf> {
+    let install = visual_studio_install()?;
+    let version_file = install
+        .join("VC")
+        .join("Auxiliary")
+        .join("Build")
+        .join("Microsoft.VCToolsVersion.default.txt");
+    let version = std::fs::read_to_string(version_file).ok()?;
+    let directory = install
+        .join("VC")
+        .join("Tools")
+        .join("MSVC")
+        .join(version.trim())
+        .join("lib")
+        .join("x64");
+    directory.is_dir().then_some(directory)
+}
+
+fn visual_studio_install() -> Option<PathBuf> {
+    let program_files =
+        std::env::var_os("ProgramFiles(x86)").unwrap_or_else(|| r"C:\Program Files (x86)".into());
+    let vswhere = PathBuf::from(program_files)
+        .join("Microsoft Visual Studio")
+        .join("Installer")
+        .join("vswhere.exe");
+    if !vswhere.is_file() {
+        return None;
+    }
+    let output = Command::new(vswhere)
+        .args([
+            "-latest",
+            "-products",
+            "*",
+            "-requires",
+            "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+            "-property",
+            "installationPath",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = String::from_utf8(output.stdout).ok()?;
+    let path = path.trim();
+    (!path.is_empty()).then(|| PathBuf::from(path))
+}
+
+fn windows_sdk_library_directories() -> Vec<PathBuf> {
+    let Some(root) = windows_sdk_root() else {
+        return Vec::new();
+    };
+    let libraries = root.join("Lib");
+    let Ok(entries) = std::fs::read_dir(&libraries) else {
+        return Vec::new();
+    };
+
+    let mut versions: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.join("ucrt").join("x64").is_dir())
+        .collect();
+    versions.sort();
+
+    match versions.pop() {
+        Some(newest) => vec![
+            newest.join("ucrt").join("x64"),
+            newest.join("um").join("x64"),
+        ],
+        None => Vec::new(),
+    }
+}
+
+fn windows_sdk_root() -> Option<PathBuf> {
+    let output = Command::new("reg")
+        .args([
+            r"query",
+            r"HKLM\SOFTWARE\Microsoft\Windows Kits\Installed Roots",
+            "/v",
+            "KitsRoot10",
+            "/reg:32",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let value = text
+        .lines()
+        .find_map(|line| line.split("REG_SZ").nth(1))?
+        .trim();
+    (!value.is_empty()).then(|| PathBuf::from(value))
+}
+
+fn find_msvc_link() -> Option<PathBuf> {
+    let directory = msvc_library_directory()?;
+    // .../lib/x64 -> .../bin/Hostx64/x64/link.exe
+    let toolset = directory.parent()?.parent()?;
+    let link = toolset
+        .join("bin")
+        .join("Hostx64")
+        .join("x64")
+        .join("link.exe");
+    link.is_file().then_some(link)
+}
+
+// bao loi ra ngoai
+
+fn linker_diagnostics(stdout: &[u8], stderr: &[u8]) -> Vec<String> {
+    const LIMIT: usize = 10;
+
+    let combined = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(stderr),
+        String::from_utf8_lossy(stdout)
+    );
+
+    let mut interesting: Vec<String> = Vec::new();
+    for line in combined.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let lowered = line.to_ascii_lowercase();
+        let is_diagnostic = lowered.contains("error")
+            || lowered.contains("warning")
+            || lowered.contains("undefined symbol")
+            || lowered.contains("cannot open");
+        if is_diagnostic && !interesting.iter().any(|kept| kept == line) {
+            interesting.push(line.to_string());
+        }
+        if interesting.len() == LIMIT {
+            interesting.push("... and more".to_string());
+            break;
+        }
+    }
+
+    if interesting.is_empty() {
+        // khong dong nao khop bo loc, tuc la linker noi mot cai gi la, thi
+        // dua nguyen ca cuc ra van la co ich nhat.
+        let trimmed = combined.trim();
+        if trimmed.is_empty() {
+            return vec!["the linker failed without saying why".to_string()];
+        }
+        return trimmed.lines().take(LIMIT).map(str::to_string).collect();
+    }
+    interesting
+}
+
+fn missing_runtime(detail: &str) -> CompileError {
+    CompileError::at( ErrorCode::RuntimeLibraryNotFound, Span::synthetic(), "cannot find `pump_runtime.lib`", )
+    .with_note(detail)
+    .with_note("a plain `cargo build` builds the runtime only as an rlib")
+    .with_help(
+        "run `cargo build --release --workspace`, or point `PUMP_RUNTIME_LIB` at the library",
+    )
+}
+
+fn write_failure(path: &Path, detail: &str) -> CompileError {
+    CompileError::at(
+        ErrorCode::CannotWriteFile,
+        Span::synthetic(),
+        format!("cannot write `{}`: {detail}", path.display()),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_diagnostic_lines_survive() {
+        let stderr = b"rust-lld: error: undefined symbol: pump_alloc\n\nsome noise\n";
+        let notes = linker_diagnostics(stderr, b"");
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].contains("pump_alloc"));
+    }
+
+    #[test]
+    fn a_repeated_error_is_reported_once() {
+        let stderr = b"lld: error: duplicate symbol: main\nlld: error: duplicate symbol: main\n";
+        assert_eq!(linker_diagnostics(stderr, b"").len(), 1);
+    }
+
+    #[test]
+    fn silence_still_produces_a_note() {
+        assert_eq!(linker_diagnostics(b"", b"").len(), 1);
+    }
+}
