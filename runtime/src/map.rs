@@ -301,7 +301,7 @@ fn rehash(table: *mut u8, wanted: u64) {
         let new_entries = scope.keep(pump_alloc_buffer(entry_bytes));
         let new_index = scope.keep(pump_alloc_buffer(index_capacity * INDEX_SLOT_SIZE as u64));
 
-        // cai nay o index trong
+        // o index trong la -1 chu khong phai 0, nen cai buffer ma allocator
         // vua xoa trang phai dien lai truoc khi do tim duoc.
         std::ptr::write_bytes(
             new_index.add(HEADER_SIZE),
