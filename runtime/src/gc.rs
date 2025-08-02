@@ -3,7 +3,7 @@
 // Doc ky truoc khi sua bat cu dong nao trong file nay. Sai o day khong bao
 // loi, khong panic, khong gi het: no chi lang le tra ve mot con tro toi mot
 // object da chet, roi ba muoi giay sau chuong trinh do o mot cho hoan toan
-// khac. T mat ...
+// khac. T mat gan hai thang moi tin duoc file nay, nen no la file duy nhat
 // trong repo ma t viet chu thich nhieu hon code.
 //
 // docs/abi.md muc 9 la ban dac ta. Cho lech nhau quan trong nhat:
@@ -98,7 +98,7 @@ pub(crate) fn can_collect() -> bool {
 }
 
 // tra descriptor theo type_id. Tra ve None neu id nam ngoai bang, va cho goi
-// PHAI chiu duoc None: type_id hong thi
+// PHAI chiu duoc None: type_id hong thi minh khong duoc doan bua, doan bua o
 // day la doc lung tung trong bo nho.
 pub(crate) fn descriptor(type_id: u32) -> Option<&'static TypeDescriptor> {
   let collector = collector();
@@ -318,7 +318,11 @@ fn table(object: *mut u8, keys_are_refs: bool, values_are_refs: bool) {
   };
 
   let (entries, index, used) = unsafe {
-    ( read_ptr(object, ENTRIES_OFFSET), read_ptr(object, INDEX_OFFSET), read_u64(object, ENTRY_USED_OFFSET), )
+    (
+      read_ptr(object, ENTRIES_OFFSET),
+      read_ptr(object, INDEX_OFFSET),
+      read_u64(object, ENTRY_USED_OFFSET),
+    )
   };
   mark(index);
   if entries.is_null() {
