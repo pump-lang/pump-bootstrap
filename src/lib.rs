@@ -52,3 +52,68 @@ pub struct Options {
     /// it back through `os.args()`. Never options of the compiler.
     pub program_args: Vec<String>,
 }
+
+impl Options {
+    pub fn new(mode: Mode, entry: impl Into<PathBuf>) -> Options {
+        Options {
+            mode,
+            entry: entry.into(),
+            output: None,
+            dump_ir: false,
+            dump_clif: false,
+            program_args: Vec::new(),
+        }
+    }
+
+    /// Goc cua project, tuc la thu muc chua file entry.
+    pub fn project_root(&self) -> &Path {
+        self.entry.parent().unwrap_or_else(|| Path::new("."))
+    }
+
+    /// Cho ma `build` ghi file chay ra.
+    pub fn executable_path(&self) -> PathBuf {
+        if let Some(output) = &self.output {
+            return output.clone();
+        }
+        let stem = self
+            .entry
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "a".to_string());
+        self.project_root()
+            .join(stem)
+            .with_extension(std::env::consts::EXE_EXTENSION)
+    }
+}
+
+/// Everything one compile piles up: source text, diagnostics, node ids.
+#[derive(Debug, Default)]
+pub struct Session {
+    pub sources: SourceMap,
+    pub diagnostics: Diagnostics,
+    pub node_ids: NodeIdAllocator,
+}
+
+impl Session {
+    pub fn new() -> Session {
+        Session::default()
+    }
+
+    /// Read a file into the source map. Hong thi bao E0700.
+    pub fn load(&mut self, path: &Path) -> Result<token::FileId, CompileError> {
+        match std::fs::read_to_string(path) {
+            Ok(text) => Ok(self.sources.add(path, text)),
+            Err(error) => Err(CompileError::at(
+                ErrorCode::CannotReadFile,
+                Span::synthetic(),
+                format!("cannot read `{}`: {error}", path.display()),
+            )),
+        }
+    }
+
+    /// Draw out every diagnostic so far, xep theo vi tri.
+    pub fn render_diagnostics(&mut self) -> String {
+        self.diagnostics.sort();
+        self.diagnostics.render(&self.sources)
+    }
+}
