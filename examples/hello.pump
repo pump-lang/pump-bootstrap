@@ -1,0 +1,6 @@
+import io
+
+fn main() {
+    io.println("Hello, world!")
+    io.println("chao ca nha, day la Pump 0.1")
+}
