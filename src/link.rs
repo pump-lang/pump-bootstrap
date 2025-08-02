@@ -1,4 +1,4 @@
-// cai nay `pump build`: mot
+// `pump build`: mot file object cong rust-lld ra mot cai .exe.
 //
 // rust-lld di kem rustup san roi nen khong phai cai them gi:
 //
