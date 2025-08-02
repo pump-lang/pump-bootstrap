@@ -1,0 +1,23 @@
+// Fibonacci ba kieu: de quy tho, vong lap, va mot bang memo.
+//
+// 23 la so t hay lay ra thu, du to de thay de quy tho no cham han ma van
+// khong phai ngoi doi. 71 thi chi de xem memo con dung khong o cho int sap
+// tran.
+
+fn fib_recursive(n: int): int {
+    if n < 2 {
+        return n
+    }
+    return fib_recursive(n - 1) + fib_recursive(n - 2)
+}
+
+fn fib_iterative(n: int): int {
+    let previous = 0
+    let current = 1
+    for _ in 0..n {
+        let next = previous + current
+        previous = current
+        current = next
+    }
+    return previous
+}
