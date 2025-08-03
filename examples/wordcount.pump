@@ -1,0 +1,36 @@
+// dem tan suat tu, dung module strings di kem. Cau van la cau t go bua
+// hoi test module strings, gio thanh cau test co dinh luon.
+
+import io
+import strings
+
+const TEXT: string = "may bay bay tren troi. May BAY bay cao; troi hom nay trong, may bay it."
+
+struct Entry {
+    word: string
+    count: int
+
+    fn to_string(): string {
+        return "{strings.pad_end(word, 9)}{count}"
+    }
+}
+
+fn normalise(raw: string): string {
+    let word = strings.to_lower(strings.trim(raw))
+    word = strings.replace(word, ".", "")
+    word = strings.replace(word, ";", "")
+    word = strings.replace(word, ",", "")
+    return word
+}
+
+fn tally(text: string): [string: int] {
+    let counts: [string: int] = {}
+    for raw in strings.split(text, " ") {
+        let word = normalise(raw)
+        if strings.is_empty(word) {
+            continue
+        }
+        counts.insert(word, counts.get(word).or(0) + 1)
+    }
+    return counts
+}

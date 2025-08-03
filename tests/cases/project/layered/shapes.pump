@@ -14,3 +14,18 @@ pub struct Circle {
         return "circle"
     }
 }
+
+pub struct Square {
+    pub side: float
+
+    pub fn area(): float {
+        return side * side
+    }
+
+    pub fn name(): string {
+        return "square"
+    }
+}
+
+implements Circle: Shape
+implements Square: Shape
