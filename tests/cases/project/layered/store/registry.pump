@@ -13,3 +13,11 @@ pub fn add(catalogue: Catalogue, name: string, value: float) {
     }
     catalogue.entries.insert(name, value)
 }
+
+pub fn count(catalogue: Catalogue): int {
+    return catalogue.entries.length
+}
+
+pub fn names(catalogue: Catalogue): [string] {
+    return catalogue.order
+}
