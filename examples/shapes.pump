@@ -1,0 +1,82 @@
+// cai nay bai tong hop,
+// match vet het nhanh, generic tu suy, interface theo cau truc, optional, loi
+// truyen len, va closure.
+//
+// t dung file nay lam bai kiem tra cuoi cung moi lan sua backend. No chay
+// dung thi hau nhu la on.
+
+import io
+
+const EPSILON: float = 0.000417
+
+interface Shape {
+    fn area(): float
+    fn label(): string
+}
+
+struct Circle {
+    radius: float
+
+    fn area(): float {
+        return 3.14159265 * radius * radius
+    }
+
+    fn label(): string {
+        return "circle(r={radius})"
+    }
+}
+
+struct Rect {
+    width: float
+    height: float
+
+    fn area(): float {
+        return width * height
+    }
+
+    fn label(): string {
+        return "rect({width}x{height})"
+    }
+
+    fn is_square(): bool {
+        let difference = width - height
+        if difference < 0.0 {
+            return -difference < EPSILON
+        }
+        return difference < EPSILON
+    }
+}
+
+implements Circle: Shape
+implements Rect: Shape
+
+// enum co payload, mot cai di vong qua interface.
+enum Command {
+    Add(Shape)
+    Scale(float)
+    Report
+    Quit
+}
+
+// hop chua generic.
+struct Registry<T> {
+    items: [T]
+
+    fn add(item: T) {
+        items.push(item)
+    }
+
+    fn count(): int {
+        return items.length
+    }
+
+    fn at(index: int): T? {
+        if index < 0 {
+            return null
+        }
+        if index >= items.length {
+            return null
+        }
+        return items[index]
+    }
+}
