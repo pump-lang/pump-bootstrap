@@ -1,6 +1,6 @@
-// may ham phu ...
+// may ham phu de choc vao runtime tu test Rust.
 //
-// cai nay khong thuoc abi,
+// khong thuoc ABI, va khong bao gio link vao chuong trinh da dich.
 
 use std::ptr;
 use std::sync::{Mutex, MutexGuard, OnceLock};
