@@ -41,3 +41,9 @@ fn render(expression: Expr): string {
 
 // A `catch` fallback has to have the success type, so the error is turned
 // into text by a handler block instead.
+fn show(expression: Expr): string {
+    let value = evaluate(expression) catch error {
+        return "error: {error.message()}"
+    }
+    return string(value)
+}
