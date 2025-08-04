@@ -719,7 +719,11 @@ mod tests {
 
         assert_eq!(pump_map_len(map), 0);
         unsafe {
-            assert!( entry_capacity(map) <= 64, "a map that never held more than one entry grew to {} slots", entry_capacity(map) );
+            assert!(
+                entry_capacity(map) <= 64,
+                "a map that never held more than one entry grew to {} slots",
+                entry_capacity(map)
+            );
         }
     }
 
