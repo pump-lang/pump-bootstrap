@@ -15,3 +15,11 @@ fn with_binder(text: string): string {
     }
     return "ok: {value}"
 }
+
+fn with_block(text: string): int {
+    let value = parse(text) catch {
+        io.println("giving up on {text}")
+        return -1
+    }
+    return value
+}

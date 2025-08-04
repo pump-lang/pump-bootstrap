@@ -25,3 +25,52 @@ fn map_ints(items: [int], transform: fn(int): int): [int] {
     }
     return result
 }
+
+fn main() {
+    let add = fn(a: int, b: int): int {
+        return a + b
+    }
+    io.println(add(2, 3))
+
+    io.println(apply(10, fn(x: int): int {
+        return x * 2
+    }))
+
+    let add_five = make_adder(5)
+    io.println(add_five(1))
+    io.println(add_five(10))
+
+    // Capturing a mutable binding by reference.
+    let total = 0
+    each([1, 2, 3], fn(item: int) {
+        total += item
+    })
+    io.println(total)
+
+    let doubled = map_ints([1, 2, 3], fn(x: int): int {
+        return x * 2
+    })
+    for value in doubled {
+        io.print("{value} ")
+    }
+    io.println("")
+
+    // A closure stored in a collection.
+    let operations: [fn(int): int] = [
+        fn(x: int): int { return x + 1 },
+        fn(x: int): int { return x * x },
+    ]
+    for operation in operations {
+        io.print("{operation(4)} ")
+    }
+    io.println("")
+
+    // Closures capturing a struct.
+    let counter = 0
+    let bump = fn() {
+        counter += 1
+    }
+    bump()
+    bump()
+    io.println(counter)
+}
