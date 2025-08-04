@@ -4,7 +4,7 @@
 //
 //   ~/.rustup/toolchains/<toolchain>/lib/rustlib/<host>/bin/rust-lld.exe
 //
-// Tren target nay no phai chay o
+// Tren target nay no phai chay o che do link.exe, va entry point la
 // `mainCRTStartup`, cai nay se goi `main` do compiler sinh ra. Chinh vi vay
 // ma runtime co y khong dinh nghia mot cai `main` nao cua rieng no.
 //
