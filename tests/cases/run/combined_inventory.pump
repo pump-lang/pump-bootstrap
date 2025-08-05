@@ -12,3 +12,71 @@ struct Item {
         return price * quantity
     }
 }
+
+enum Change {
+    Add(Item)
+    Remove(string)
+    Restock(string, int)
+}
+
+struct Inventory {
+    items: [Item]
+
+    fn find(name: string): Item? {
+        for item in items {
+            if item.name == name {
+                return item
+            }
+        }
+        return null
+    }
+
+    fn value(): int {
+        let total = 0
+        for item in items {
+            total += item.total()
+        }
+        return total
+    }
+
+    fn apply(change: Change): string {
+        match change {
+            Change.Add(item) => {
+                items.push(item)
+                return "added {item.name}"
+            }
+            Change.Remove(name) => {
+                let kept: [Item] = []
+                let found = false
+                for item in items {
+                    if item.name == name {
+                        found = true
+                    } else {
+                        kept.push(item)
+                    }
+                }
+                items = kept
+                if found {
+                    return "removed {name}"
+                }
+                return "no such item {name}"
+            }
+            Change.Restock(name, amount) => {
+                let item = this.find(name)
+                if item == null {
+                    return "cannot restock {name}"
+                }
+                item.quantity += amount
+                return "restocked {name} to {item.quantity}"
+            }
+        }
+    }
+
+    fn price_of(name: string): int! {
+        let item = this.find(name)
+        if item == null {
+            fail "unknown item `{name}`"
+        }
+        return item.price
+    }
+}
