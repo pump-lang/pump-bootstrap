@@ -368,7 +368,7 @@ fn spill_callee_saved(slots: &mut [usize; SPILL_SLOTS]) {
       "mov [rax + 24], rsi",
       "mov [rax + 32], r12",
       "mov [rax + 80], r13",
-      "mov [rax + 96], r14",
+      "mov [rax + 48], r14",
       "mov [rax + 112], r15",
       in("rax") base,
       options(nostack, preserves_flags),
@@ -643,7 +643,10 @@ mod tests {
     // mot chut du cho cai tu cu con giong dia chi node: quet bao thu khong
     // the hua bang khong duoc.
     let after = heap_object_count();
-    assert!( after <= before + 4, "a 32-node cycle was not collected: {before} objects before, {after} after" );
+    assert!(
+      after <= before + 4,
+      "a 32-node cycle was not collected: {before} objects before, {after} after"
+    );
   }
 
   #[test]
