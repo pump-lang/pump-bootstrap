@@ -59,3 +59,13 @@ implements Reading: Describable
 
 // Arrays are invariant, so `[Reading]` is not an `[Describable]`. A bounded
 // generic parameter accepts either.
+fn render<T: Describable>(items: [T]): string {
+    let out = ""
+    for item in items {
+        if out != "" {
+            out += ", "
+        }
+        out += item.describe()
+    }
+    return out
+}

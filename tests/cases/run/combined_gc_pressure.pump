@@ -27,3 +27,22 @@ fn total(list: Node?): int {
     }
     return sum
 }
+
+fn churn(rounds: int): int {
+    let survivors: [string] = []
+    let i = 0
+    while i < rounds {
+        // Garbage: allocated and dropped immediately.
+        let scratch: [int] = []
+        let j = 0
+        while j < 50 {
+            scratch.push(i * j)
+            j += 1
+        }
+        if i % 100 == 0 {
+            survivors.push("round {i} sum {scratch[49]}")
+        }
+        i += 1
+    }
+    return survivors.length
+}
