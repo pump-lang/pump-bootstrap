@@ -363,7 +363,10 @@ pub fn ru_symbols() -> Vec<(&'static str, *const u8)> {
         pump_os_error,
     ];
 
-    symbols.push(( "pump_error_slot", std::ptr::addr_of!(crate::panic::pump_error_slot) as *const u8, ));
+    symbols.push((
+        "pump_error_slot",
+        std::ptr::addr_of!(crate::panic::pump_error_slot) as *const u8,
+    ));
     symbols
 }
 
