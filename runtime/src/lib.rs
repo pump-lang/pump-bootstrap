@@ -241,7 +241,7 @@ pub(crate) unsafe fn write_ptr(object: *mut u8, offset: usize, value: *mut u8) {
 
 /// Every runtime entry point with its address, for the JIT to hand to
 /// JITBuilder::symbol.
-pub fn ru_symbols() -> Vec<(&'static str, *const u8)> {
+pub fn runtime_symbols() -> Vec<(&'static str, *const u8)> {
     use crate::alloc::{pump_alloc, pump_alloc_buffer};
     use crate::array::{
         pump_array_concat, pump_array_get, pump_array_len, pump_array_new, pump_array_pop,
@@ -395,7 +395,7 @@ mod tests {
 
     #[test]
     fn every_runtime_symbol_is_distinct() {
-        let symbols = ru_symbols();
+        let symbols = runtime_symbols();
         let mut names: Vec<&str> = symbols.iter().map(|(name, _)| *name).collect();
         let total = names.len();
         names.sort_unstable();
