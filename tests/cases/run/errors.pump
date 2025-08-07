@@ -25,3 +25,12 @@ fn require_positive(value: int): void! {
     }
     return
 }
+
+fn checked_sum(values: [int]): int! {
+    let total = 0
+    for value in values {
+        require_positive(value)!
+        total += value
+    }
+    return total
+}

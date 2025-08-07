@@ -20,3 +20,11 @@ fn name_of(color: Color): string {
         Color.Blue => return "blue"
     }
 }
+
+fn area(shape: Shape): float {
+    match shape {
+        Shape.Circle(radius) => return 3.0 * radius * radius
+        Shape.Rect(width, height) => return width * height
+        Shape.Empty => return 0.0
+    }
+}
