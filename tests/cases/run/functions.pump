@@ -16,3 +16,14 @@ fn max(a: int, b: int): int {
 
     return b
 }
+
+fn nothing() {
+    return
+}
+
+fn recurse(n: int): int {
+    if n <= 1 {
+        return 1
+    }
+    return n * recurse(n - 1)
+}
