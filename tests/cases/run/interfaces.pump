@@ -38,3 +38,15 @@ struct Folder {
 
 implements File: Named
 implements Folder: Named
+
+fn announce(item: Named) {
+    io.println(item.label())
+}
+
+fn total_size(items: [Sized]): int {
+    let total = 0
+    for item in items {
+        total += item.size()
+    }
+    return total
+}
