@@ -40,3 +40,11 @@ fn depth(tree: Tree): int {
         }
     }
 }
+
+fn describe(pair: (int, string)): string {
+    match pair {
+        (0, text) => return "zero:{text}"
+        (n, "stop") => return "stop at {n}"
+        (n, text) => return "{n}:{text}"
+    }
+}

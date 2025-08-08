@@ -24,3 +24,10 @@ fn bucket(value: int): string {
         _ => return "large"
     }
 }
+
+fn vowel(letter: char): bool {
+    match letter {
+        'a' | 'e' | 'i' | 'o' | 'u' => return true
+        _ => return false
+    }
+}
