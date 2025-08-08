@@ -30,3 +30,14 @@ fn band(id: int): string {
         User { name, .. } => return "adult {name}"
     }
 }
+
+fn tally(values: [int?]): int {
+    let total = 0
+    for value in values {
+        if value == null {
+            continue
+        }
+        total += value
+    }
+    return total
+}
