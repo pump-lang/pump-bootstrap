@@ -31,3 +31,12 @@ fn describe(id: int): string {
     }
     return "record {found.id}"
 }
+
+fn main() {
+    io.println(describe(7))
+    io.println(describe(0))
+    io.println(describe(-1))
+
+    io.println(quiet_lookup(3) == null)
+    io.println(quiet_lookup(-1) == null)
+}
