@@ -311,13 +311,6 @@ fn trace_fields(object: *mut u8, offsets: *const u32, count: u32) {
 // map va set. Ca hai cung mot hinh, chi khac o chuyen cot value co duoc dung
 // hay khong. Phai di tung entry mot chu khong di theo index buffer, vi index
 // buffer co the con bia mo tro toi entry da xoa.
-
-// TODO: bo cai nay di, viet ra roi khong dung
-fn dbg_dump(tag: &str, n: usize) {
-  if std::env::var("PUMP_DBG").is_ok() {
-    eprintln!("[{}] {}", tag, n);
-  }
-}
 fn trace_table(object: *mut u8, keys_are_refs: bool, values_are_refs: bool) {
   use crate::map::{
     ENTRIES_OFFSET, ENTRY_HASH_OFFSET, ENTRY_KEY_OFFSET, ENTRY_SIZE, ENTRY_USED_OFFSET,
