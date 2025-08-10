@@ -400,7 +400,7 @@ fn scan_range(low: usize, high: usize) {
 // Gom het goc lai. Thu tu o day khong quan trong, nhung thieu MOT nguon goc
 // thoi la du de chuong trinh do ve sau, nen dem lai cho du: stack va thanh
 // ghi, bang global_roots, o loi dang treo, may root dang ky tay, va RootScope.
-fn mark2(stack_top: usize) {
+fn mark_roots(stack_top: usize) {
   // `mark` cung cham vao collector, nen o day tuyet doi khong duoc giu
   // borrow cua no vat qua mot loi goi: chep tung field ra truoc, va list nao
   // cung phai tra qua mot borrow moi. Cho nay t bi borrow checker chui may
@@ -492,7 +492,7 @@ pub extern "C" fn pump_gc_collect() {
   spill_callee_saved(&mut registers);
   let stack_top = registers.as_ptr() as usize;
 
-  mark2(stack_top);
+  mark_roots(stack_top);
   while let Some(object) = collector().work.pop() {
     trace(object);
   }
