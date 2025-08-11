@@ -29,3 +29,20 @@ fn first_char(text: string): char? {
     }
     return text.chars()[0]
 }
+
+fn shout(text: string): string? {
+    let letter = first_char(text)?
+    return "{letter}!"
+}
+
+fn main() {
+    io.println(manager_name("an").or("none"))
+    io.println(manager_name("minh").or("none"))
+    io.println(manager_name("nobody").or("none"))
+
+    io.println(shout("hi").or("-"))
+    io.println(shout("").or("-"))
+
+    // `x?.field` reads as optional chaining and behaves as propagation.
+    io.println(chained("an").or("none"))
+}
