@@ -20,3 +20,25 @@ fn describe(name: string, age: int = 0, city: string = "?"): string {
 fn label(prefix: string, values: ...int): string {
     return "{prefix}={values.length}"
 }
+
+fn main() {
+    io.println(connect("localhost"))
+    io.println(connect("localhost", 8080))
+    io.println(connect(
+        host: "example.com",
+        port: 443
+    ))
+    io.println(connect(host: "named-only"))
+
+    io.println(sum())
+    io.println(sum(1))
+    io.println(sum(1, 2, 3, 4))
+
+    io.println(describe("a"))
+    io.println(describe("a", 5))
+    io.println(describe("a", city: "Hanoi"))
+    io.println(describe("a", 5, "Hue"))
+
+    io.println(label("empty"))
+    io.println(label("three", 1, 2, 3))
+}

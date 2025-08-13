@@ -20,3 +20,40 @@ fn head(items: [int]): int? {
     }
     return items[0]
 }
+
+fn main() {
+    let user: User? = find(10)
+    if user != null {
+        io.println(user.name)
+    }
+
+    let missing = find(1)
+    io.println(missing == null)
+    if missing == null {
+        io.println("nobody")
+    }
+
+    // `expect` panics on null, `or` substitutes.
+    io.println(find(10).expect("id 10 exists").age)
+    io.println(head([]).or(-1))
+    io.println(head([4, 5]).or(-1))
+
+    // Narrowing works through `else` too.
+    let maybe = find(1)
+    if maybe == null {
+        io.println("absent")
+    } else {
+        io.println(maybe.name)
+    }
+
+    // An optional field, and an optional inside a collection.
+    let names: [string?] = ["a", null]
+    io.println(names[0] == null)
+    io.println(names[1] == null)
+
+    // `&&` narrows the right operand.
+    let candidate = find(10)
+    if candidate != null && candidate.age > 10 {
+        io.println("adult {candidate.name}")
+    }
+}
