@@ -125,7 +125,7 @@ pub fn link_executable(
     output: &Path,
 ) -> Result<(), CompileError> {
     let linker = find_linker()?;
-    let search_paths = library2()?;
+    let search_paths = library_search_paths()?;
 
     let mut command = Command::new(&linker);
     if linker
@@ -233,7 +233,7 @@ fn rustc_sysroot() -> Option<PathBuf> {
     }
 }
 
-fn library2() -> Result<Vec<PathBuf>, CompileError> {
+fn library_search_paths() -> Result<Vec<PathBuf>, CompileError> {
     if let Some(configured) = std::env::var_os("LIB") {
         let paths: Vec<PathBuf> = std::env::split_paths(&configured)
             .filter(|path| !path.as_os_str().is_empty())
