@@ -30,3 +30,14 @@ pub fn start(): string {
 fn internal(): string {
     return SECRET
 }
+
+fn main() {
+    io.println(LIMIT)
+    io.println(start())
+
+    let account = Account { owner: "Minh", balance: 50 }
+    io.println(account.owner)
+    io.println(account.balance)
+    io.println(account.describe())
+    io.println(account.projected())
+}
