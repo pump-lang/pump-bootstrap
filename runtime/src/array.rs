@@ -90,7 +90,7 @@ unsafe fn elements_are_refs(array: *const u8) -> bool {
 
 // no ra
 
-fn gr_to(array: *mut u8, wanted: u64) {
+fn grow_to(array: *mut u8, wanted: u64) {
     unsafe {
         if wanted == 0 || wanted <= capacity(array) {
             return;
@@ -128,7 +128,7 @@ fn grow_for_one_more(array: *mut u8) {
         if length(array) < capacity {
             return;
         }
-        gr_to(array, (capacity * 2).max(MIN_CAPACITY));
+        grow_to(array, (capacity * 2).max(MIN_CAPACITY));
     }
 }
 
@@ -151,7 +151,7 @@ pub(crate) fn empty_array(type_id: u32) -> *mut u8 {
 pub extern "C" fn pump_array_new(type_id: u32, capacity: u64) -> *mut u8 {
     let scope = RootScope::new();
     let array = scope.keep(empty_array(type_id));
-    gr_to(array, capacity);
+    grow_to(array, capacity);
     array
 }
 
@@ -231,7 +231,7 @@ pub extern "C" fn pump_array_reserve(a: *mut u8, capacity: u64) {
         if capacity <= self::capacity(a) {
             return;
         }
-        gr_to(a, capacity);
+        grow_to(a, capacity);
         bump_modcount(a);
     }
 }
