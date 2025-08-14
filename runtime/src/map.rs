@@ -577,7 +577,12 @@ pub extern "C" fn pump_map_values(m: *const u8) -> *mut u8 {
 
 /// Advances an iteration.
 #[no_mangle]
-pub extern "C" fn pump_map_iter_next( m: *const u8, cursor: *mut u64, out_key: *mut u64, out_value: *mut u64, ) -> i8 {
+pub extern "C" fn pump_map_iter_next(
+    m: *const u8,
+    cursor: *mut u64,
+    out_key: *mut u64,
+    out_value: *mut u64,
+) -> i8 {
     i8::from(unsafe { iter_next(m, cursor, out_key, out_value) })
 }
 
