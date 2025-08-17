@@ -4,7 +4,7 @@
 // suc chua cua heap, nen GC chay di chay lai trong luc no thuc thi, roi in ra
 // checksum cua nhung du lieu le ra phai song. File ket qua nam canh la cai ma
 // mot bo GC dung se in ra; bo GC nao gom nham mot thu con song thi mot con so
-// se lech chu khong nhat thiet la do,
+// se lech chu khong nhat thiet la do, va do la ca cai y cua hinh nay.
 //
 // May ca nay CHAM co y: chung sinh ra de dan GC, ma dan thi phai co thoi
 // gian. Day la nua ton kem nhat trong ca cay test.
