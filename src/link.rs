@@ -402,7 +402,11 @@ fn linker_diagnostics(stdout: &[u8], stderr: &[u8]) -> Vec<String> {
 }
 
 fn missing_runtime(detail: &str) -> CompileError {
-    CompileError::at( ErrorCode::RuntimeLibraryNotFound, Span::synthetic(), "cannot find `pump_runtime.lib`", )
+    CompileError::at(
+        ErrorCode::RuntimeLibraryNotFound,
+        Span::synthetic(),
+        "cannot find `pump_runtime.lib`",
+    )
     .with_note(detail)
     .with_note("a plain `cargo build` builds the runtime only as an rlib")
     .with_help(
