@@ -1,4 +1,4 @@
-// ban than dong ...
+// ban than dong lenh `pump`: xu ly doi so, va duong `build` ra file chay.
 
 mod support;
 
