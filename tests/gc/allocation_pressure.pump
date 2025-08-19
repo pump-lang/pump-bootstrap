@@ -1,0 +1,22 @@
+// Allocation pressure: many times the collection threshold, almost all of it
+// garbage, with a small live set held across every cycle.
+//
+// The heap collects at a live-set watermark that starts at one mebibyte, so
+// the loop below - half a million thirty-two byte nodes, sixteen mebibytes of
+// churn - forces the collector to run many times over. Every number printed is
+// a checksum of work the loop did, so a collector that freed something live
+// would change the answer rather than merely crashing.
+import io
+
+struct Node {
+    value: int
+    next: Node?
+}
+
+struct Anchor {
+    label: string
+    total: int
+}
+
+// Allocates and immediately abandons `count` nodes, returning a checksum that
+// depends on every one of them.
