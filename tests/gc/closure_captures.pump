@@ -1,0 +1,18 @@
+// Closures: a captured environment is a heap object reachable only through the
+// closure, and the closure itself is often reachable only from a collection.
+//
+// A closure's capture slots are traced by the collector but its code pointer
+// is not, so getting the plan wrong either frees a live capture or tries to
+// trace a code address as an object. This case builds many thousands of
+// closures over captured structs, arrays and other closures, throws most of
+// them away, and calls the survivors after the collector has run repeatedly.
+import io
+
+struct Counter {
+    label: string
+    count: int
+}
+
+struct Bundle {
+    values: [int]
+}
