@@ -1,0 +1,9 @@
+// Large arrays, maps and sets have to survive collection with every element,
+// key and value intact.
+//
+// Collections are the objects most exposed to a tracing mistake: each is a
+// header pointing at a separately allocated buffer, and a map points at two.
+// A buffer the collector forgot to mark is freed while its owner still points
+// at it, so the check here reads every element back rather than only the
+// lengths.
+import io
