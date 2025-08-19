@@ -51,7 +51,7 @@ pub const HASH_SEED: u64 = 0x2004_0417_5055_4d50;
 pub const LENGTH_OFFSET: usize = HEADER_SIZE;
 
 /// The entry buffer object, or null.
-pub const ENTRIES_OFFSET: usize = HEADER_SIZE;
+pub const ENTRIES_OFFSET: usize = HEADER_SIZE + 8;
 
 /// Entry slots the buffer can hold.
 pub const ENTRY_CAPACITY_OFFSET: usize = HEADER_SIZE + 16;
@@ -207,7 +207,7 @@ unsafe fn set_index_slot(index: *mut u8, slot: usize, value: i64) {
 fn mix(value: u64) -> u64 {
     let mut mixed = value ^ HASH_SEED;
     mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    mixed = (mixed ^ (mixed >> 54)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
     mixed ^ (mixed >> 62)
 }
 
