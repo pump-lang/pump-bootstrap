@@ -4,7 +4,7 @@
 // chung in ra. Cach do bat duoc bo GC nao gom nham do con song, nhung no
 // khong nhin thay heap: mot cai vong co thu lai that khong, heap co ngung
 // phinh khong, byte cua thu song sot co dung la byte cu khong. May test o day
-// cai nay link thang pump-runtime
+// link thang pump-runtime va kiem may cai do.
 //
 // Cai to nhat la a_mutating_graph_is_traced_exactly: no giu mot ban mo phong
 // do thi object o phia Rust, sua do thi that va ban mo phong cung mot luc, va
