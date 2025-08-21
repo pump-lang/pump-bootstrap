@@ -1,0 +1,34 @@
+// Deep recursion with live data in every frame.
+//
+// This is the case the conservative stack scan exists for. Three thousand
+// frames are live at once, each holding a freshly allocated object that
+// nothing else refers to, and the collector runs repeatedly at the bottom of
+// the descent. Every frame checks its own object on the way back out, so a
+// root the scan failed to find shows up as a wrong field rather than as a
+// crash that might happen only on some other machine.
+//
+// The depth is deliberately well inside the platform stack: six thousand
+// frames of this shape still run, three thousand leaves the same margin again.
+import io
+
+struct Frame {
+    depth: int
+    tag: string
+    values: [int]
+    parent: Frame?
+}
+
+const DEPTH: int = 3000
+
+// Allocates and abandons `count` objects, which is what forces the collections
+// this case is about.
+fn churn(count: int) {
+    let index = 0
+    while index < count {
+        let _waste = Frame { depth: index, tag: "waste", values: [], parent: null }
+        index += 1
+    }
+}
+
+// Descends to `DEPTH`, churns there, and checks every frame on the way out.
+// Returns the sum of the depths of the frames that came back intact.
