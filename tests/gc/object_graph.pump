@@ -1,0 +1,37 @@
+// A wide object graph in every shape the collector traces differently:
+// structs, enums with payloads, tuples, boxed optionals, interface values,
+// generic containers and closures, all sharing substructure and all reachable
+// from one root.
+//
+// Each of those has its own entry in the collector's trace plan, so a graph
+// that mixes them is the case where a wrong plan for one kind shows up as a
+// wrong answer from a traversal that
+import io
+
+struct Tag {
+    text: string
+}
+
+enum Payload {
+    Empty
+    Number(int)
+    Pair(int, int)
+    Labelled(Tag)
+}
+
+struct TreeNode {
+    id: int
+    payload: Payload
+    tags: [Tag]
+    left: TreeNode?
+    right: TreeNode?
+    parent: TreeNode?
+}
+
+struct Box<T> {
+    value: T
+}
+
+interface Described {
+    fn describe(): string
+}
