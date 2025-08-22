@@ -1,0 +1,15 @@
+// Liveness: references held across many collections must survive, and must
+// still hold exactly the bytes they held before.
+//
+// Surviving is the easy half. This case checks the other half as well: every
+// field of every survivor is compared against the value it was built with, so
+// an object that was swept and had its storage handed to something else shows
+// up as a wrong answer rather than as a crash that might not happen.
+import io
+
+struct Record {
+    id: int
+    name: string
+    scores: [int]
+    next: Record?
+}
