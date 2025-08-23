@@ -5,7 +5,7 @@
 //
 // Each of those has its own entry in the collector's trace plan, so a graph
 // that mixes them is the case where a wrong plan for one kind shows up as a
-// wrong answer from a traversal that
+// wrong answer from a traversal that never touches the others directly.
 import io
 
 struct Tag {
