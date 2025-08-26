@@ -23,7 +23,7 @@ pub const LENGTH_OFFSET: usize = HEADER_SIZE;
 pub const HASH_OFFSET: usize = HEADER_SIZE + 8;
 
 /// First content byte.
-pub const BYTES_OFFSET: usize = HEADER_SIZE + 8;
+pub const BYTES_OFFSET: usize = HEADER_SIZE + 16;
 
 /// Total object size for a string of `length` bytes, before alignment.
 pub const fn unaligned_size(length: u64) -> u64 {
