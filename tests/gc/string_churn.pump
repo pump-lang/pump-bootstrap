@@ -1,0 +1,21 @@
+// Heavy string building: concatenation and interpolation in a loop.
+//
+// Strings are the runtime's most common heap object and the one most often
+// built out of two others, so a loop that concatenates produces a chain of
+// intermediates that are garbage the instant the next one exists. This case
+// makes a great many of them, keeps a few, and checks the survivors byte for
+// byte.
+//
+// The file is not called `strings.pump` on purpose: a project module of that
+// name would shadow the bundled `strings` this case imports.
+import io
+import strings
+
+struct Row {
+    index: int
+    key: string
+    rendered: string
+}
+
+// Builds one line by repeated concatenation, so every partial result is an
+// object that becomes garbage the moment the next one exists.
