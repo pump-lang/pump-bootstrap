@@ -1,0 +1,26 @@
+// Reference cycles: the case a reference count cannot reclaim, and the reason
+// this collector is mark-sweep.
+//
+// Three shapes are built and abandoned over and over: a ring, a node pointing
+// at itself, and a two-struct cycle that passes through a third object. The
+// totals below add up to far more than the heap ever holds, so if a cycle
+// leaked the process would not survive the loop.
+import io
+
+struct Ring {
+    id: int
+    next: Ring?
+}
+
+struct Owner {
+    name: string
+    pet: Pet?
+}
+
+struct Pet {
+    name: string
+    owner: Owner?
+}
+
+// Builds a closed ring of `length` nodes and returns the sum of its ids,
+// walked the whole way round.
