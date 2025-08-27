@@ -190,14 +190,14 @@ pub extern "C" fn pump_string_slice(s: *const u8, start: i64, end: i64) -> *mut 
             pump_panic_index(end, length);
         }
         let bytes = bytes_of(s);
-        if !is_bou(bytes, start as usize) || !is_bou(bytes, end as usize) {
+        if !is_boundary(bytes, start as usize) || !is_boundary(bytes, end as usize) {
             panic_not_a_boundary();
         }
         new_string(&bytes[start as usize..end as usize])
     }
 }
 
-fn is_bou(bytes: &[u8], offset: usize) -> bool {
+fn is_boundary(bytes: &[u8], offset: usize) -> bool {
     offset == bytes.len() || bytes[offset] & 0xc0 != 0x80
 }
 
@@ -390,9 +390,9 @@ mod tests {
 
         // Byte 2 is the second half of the é, so it is not a legal boundary.
         let bytes = unsafe { bytes_of(s) };
-        assert!(!is_bou(bytes, 2));
-        assert!(is_bou(bytes, 3));
-        assert!(is_bou(bytes, 6));
+        assert!(!is_boundary(bytes, 2));
+        assert!(is_boundary(bytes, 3));
+        assert!(is_boundary(bytes, 6));
     }
 
     #[test]
