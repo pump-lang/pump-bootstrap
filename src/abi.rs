@@ -195,7 +195,7 @@ pub mod map {
     /// How keys are hashed and compared; one of the `KEY_KIND_*` constants.
     pub const KEY_KIND_OFFSET: u32 = HEADER_SIZE + 56;
     /// Bit 0: the value slot holds a pointer.
-    pub const SLOT_FLAGS_OFFSET: u32 = HEADER_SIZE + 120;
+    pub const SLOT_FLAGS_OFFSET: u32 = HEADER_SIZE + 60;
 
     /// Total size of a map object.
     pub const SIZE: u64 = HEADER_SIZE as u64 + 64;
