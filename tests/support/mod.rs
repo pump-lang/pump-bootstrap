@@ -9,7 +9,7 @@
 //
 // Bo test goi thang cai binary `pump` nhu mot tien trinh con chu khong goi
 // vao thu vien, vi cai ma nguoi dung gap la mot tien trinh: stdout cua no,
-// stderr cua no, ...
+// stderr cua no, va ma thoat cua no.
 
 #![allow(dead_code)]
 
