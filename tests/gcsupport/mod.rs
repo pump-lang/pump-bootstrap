@@ -46,7 +46,7 @@ pub const fn magic(index: u64) -> u64 {
     0x00c0_ffee_0000_0000 | index
 }
 
-// ===== bang type
+// ===== bang type bia ra =====
 
 static NODE_REF_OFFSETS: [u32; 2] = [NEXT as u32, CHILD as u32];
 
