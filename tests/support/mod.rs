@@ -74,4 +74,4 @@ pub fn missing_runtime_library_message() -> String {
     )
 }
 
-// ===== ca phai
+// ===== ca phai chay duoc =====
