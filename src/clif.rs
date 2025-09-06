@@ -907,7 +907,7 @@ impl<'a, M: Module> Codegen<'a, M> {
         Ok(())
     }
 
-    // ban dau tien ...
+    // ban dau tien cua gen_expr, he 2025. No khong co Frame, khong tra
     // Result, gap cai gi la thi panic luon. T de day vi con hai cho trong ban
     // moi t chep y nguyen tu day sang ma van chua hieu het (cai vuot dau khi
     // load i8, va cho tinh stride cua PtrAdd). Bao gio hieu han thi xoa.
