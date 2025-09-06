@@ -90,7 +90,7 @@ const TRAP_UNREACHABLE: TrapCode = TrapCode::unwrap_user(1);
 
 const UNHANDLED_ERROR_MESSAGE: &[u8] = b"unhandled error returned from main";
 
-fn mem2() -> MemFlags {
+fn mem_flags() -> MemFlags {
     MemFlags::trusted()
 }
 
@@ -1153,12 +1153,12 @@ impl<'a, M: Module> Codegen<'a, M> {
             InstKind::Load { ptr, offset, ty } => {
                 let ptr = frame.value(*ptr, span)?;
                 let ty = self.clif_type(*ty);
-                Some(builder.ins().load(ty, mem2(), ptr, *offset))
+                Some(builder.ins().load(ty, mem_flags(), ptr, *offset))
             }
             InstKind::Store { ptr, offset, value } => {
                 let ptr = frame.value(*ptr, span)?;
                 let value = frame.value(*value, span)?;
-                builder.ins().store(mem2(), value, ptr, *offset);
+                builder.ins().store(mem_flags(), value, ptr, *offset);
                 None
             }
             InstKind::PtrAdd { ptr, index, stride } => {
@@ -1203,7 +1203,7 @@ impl<'a, M: Module> Codegen<'a, M> {
                 let closure = frame.value(*closure, span)?;
                 let code = builder.ins().load(
                     self.pointer_type,
-                    mem2(),
+                    mem_flags(),
                     closure,
                     abi::closure::CODE_OFFSET as i32,
                 );
@@ -1223,19 +1223,14 @@ impl<'a, M: Module> Codegen<'a, M> {
                 let object = frame.value(*object, span)?;
                 let itable = builder.ins().load(
                     self.pointer_type,
-                    mem2(),
+                    mem_flags(),
                     object,
                     abi::interface::ITABLE_OFFSET as i32,
                 );
-                let data = builder.ins().load(
-                    self.pointer_type,
-                    mem2(),
-                    object,
-                    abi::interface::DATA_OFFSET as i32,
-                );
+                let data = builder.ins().load( self.pointer_type, mem_flags(), object, abi::interface::DATA_OFFSET as i32, );
                 let method = builder.ins().load(
                     self.pointer_type,
-                    mem2(),
+                    mem_flags(),
                     itable,
                     abi::itable_method_offset(*slot) as i32,
                 );
@@ -1627,3 +1622,105 @@ impl<'a, M: Module> Codegen<'a, M> {
 }
 
 // ### per-function bookkeeping ##############################################
+
+#[derive(Default)]
+struct Frame {
+    blocks: Vec<cl::Block>,
+    values: Vec<Option<cl::Value>>,
+    slots: Vec<cl::StackSlot>,
+    func_refs: HashMap<FuncId, cl::FuncRef>,
+    data_refs: HashMap<DataId, cl::GlobalValue>,
+    sig_refs: HashMap<u32, cl::SigRef>,
+}
+
+impl Frame {
+    fn value(&self, value: Value, span: Span) -> Result<cl::Value, CompileError> {
+        self.values
+            .get(value.index())
+            .copied()
+            .flatten()
+            .ok_or_else(|| failure_at(span, format!("{value:?} is used before it is defined")))
+    }
+
+    fn values_of(&self, values: &[Value], span: Span) -> Result<Vec<cl::Value>, CompileError> {
+        values
+            .iter()
+            .map(|&value| self.value(value, span))
+            .collect()
+    }
+
+    fn block_args(&self, values: &[Value], span: Span) -> Result<Vec<cl::BlockArg>, CompileError> {
+        values
+            .iter()
+            .map(|&value| self.value(value, span).map(cl::BlockArg::Value))
+            .collect()
+    }
+}
+
+// --- translation helpers -------------------------------------
+
+fn block_order(function: &Function) -> Vec<BlockRef> {
+    let successors: Vec<Vec<BlockRef>> = function
+        .blocks
+        .iter()
+        .map(|block| block.terminator.successors())
+        .collect();
+
+    let mut visited = vec![false; function.blocks.len()];
+    let mut postorder = Vec::with_capacity(function.blocks.len());
+    let mut stack = vec![(function.entry, 0usize)];
+    visited[function.entry.index()] = true;
+
+    while let Some((block, next)) = stack.pop() {
+        let edges = &successors[block.index()];
+        if next < edges.len() {
+            stack.push((block, next + 1));
+            let successor = edges[next];
+            if !visited[successor.index()] {
+                visited[successor.index()] = true;
+                stack.push((successor, 0));
+            }
+        } else {
+            postorder.push(block);
+        }
+    }
+
+    postorder.reverse();
+    for index in 0..function.blocks.len() {
+        if !visited[index] {
+            postorder.push(BlockRef(index as u32));
+        }
+    }
+    postorder
+}
+
+fn align_shift(align: u32) -> u8 {
+    align.max(1).trailing_zeros() as u8
+}
+
+fn signed_divide(b: &mut FunctionBuilder, lhs: cl::Value, rhs: cl::Value) -> cl::Value {
+    // Cranelift trap o int.min / -1, Pump thi cuon ve int.min. Nen chia cho
+    // -1 t doi thanh chia cho 1 roi tu doi dau lay thuong.
+    let ty = b.func.dfg.value_type(rhs);
+    let m1 = b.ins().icmp_imm(IntCC::Equal, rhs, -1);
+    let one = b.ins().iconst(ty, 1);
+    let d = b.ins().select(m1, one, rhs);
+    let q = b.ins().sdiv(lhs, d);
+    let neg = b.ins().ineg(lhs);
+    b.ins().select(m1, neg, q)
+}
+
+fn signed_remainder(b: &mut FunctionBuilder, lhs: cl::Value, rhs: cl::Value) -> cl::Value {
+    let ty = b.func.dfg.value_type(rhs);
+    let m1 = b.ins().icmp_imm(IntCC::Equal, rhs, -1);
+    let one = b.ins().iconst(ty, 1);
+    let d = b.ins().select(m1, one, rhs);
+    // so du thi khong phai doi dau gi ca, int.min % 1 == 0 san roi
+    b.ins().srem(lhs, d)
+}
+
+// con ma o block ba. Hoi thang 8 cai nay sinh ma sai, ma sai duy nhat khi so
+// paramter cua ham la so le va co dung mot cai closure o trong. Ngoi tu chin
+// gio toi den hai gio sang moi ra: t quen mat cai nhanh saturated, Cranelift
+// no che so dem theo do rong toan hang nen `x << 64` no tra lai dung `x`.
+// De nguyen may dong duoi nay, dung "don gian hoa" lai bang mot lenh ishl.
