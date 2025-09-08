@@ -115,7 +115,7 @@ impl Default for CodegenOptions {
 }
 
 /// The Cranelift shared flags both back ends use.
-pub fn do_flags(options: &CodegenOptions) -> Result<settings::Flags, CompileError> {
+pub fn shared_flags(options: &CodegenOptions) -> Result<settings::Flags, CompileError> {
     let mut builder = settings::builder();
     for (name, value) in [
         ("opt_level", options.opt_level),
@@ -149,7 +149,7 @@ pub fn target_isa(options: &CodegenOptions) -> Result<OwnedTargetIsa, CompileErr
         ))
     })?;
     builder
-        .finish(do_flags(options)?)
+        .finish(shared_flags(options)?)
         .map_err(|error| failure(format!("cannot configure the target: {error}")))
 }
 
@@ -917,7 +917,7 @@ impl<'a, M: Module> Codegen<'a, M> {
     //         InstKind::ConstInt(v) => Some(b.ins().iconst(types::I64, *v)),
     //         InstKind::ConstFloat(v) => Some(b.ins().f64const(*v)),
     //         InstKind::ConstBool(v) => Some(b.ins().iconst(types::I8, *v as i64)),
-    // cai nay  instkind::constchar(v) =>
+    //         InstKind::ConstChar(v) => Some(b.ins().iconst(types::I32, *v as i64)),
     //         InstKind::ConstNull => Some(b.ins().iconst(self.pointer_type, 0)),
     //
     //         InstKind::ConstString(t) => {
@@ -938,24 +938,24 @@ impl<'a, M: Module> Codegen<'a, M> {
     //
     //         InstKind::SlotAddr(s) => {
     //             // luc do t chua biet stack_addr can pointer_type
-    //  Some(b.ins().stack_addr(self.pointer_type,
+    //             Some(b.ins().stack_addr(self.pointer_type, self.slots[s.index()], 0))
     //         }
     //         InstKind::GlobalAddr(g) => {
     //             let id = self.globals[g.index()];
     //             let gv = self.module.declare_data_in_func(id, b.func);
     //             Some(b.ins().symbol_value(self.pointer_type, gv))
     //         }
-    //  InstKind::Load { ptr,
+    //         InstKind::Load { ptr, offset, ty } => {
     //             let p = self.val(*ptr);
     //             let t = self.clif_type(*ty);
     //             // i8 nap len la phai vuot dau? khong, uextend. Cho nay t sai
-    //             // hai lan roi, bool ra 63 thay vi 1.
+    //             // hai lan roi, bool ra 255 thay vi 1.
     //             Some(b.ins().load(t, MemFlags::trusted(), p, *offset))
     //         }
-    //  InstKind::Store { ptr,
+    //         InstKind::Store { ptr, offset, value } => {
     //             let p = self.val(*ptr);
     //             let v = self.val(*value);
-    //  b.ins().store(MemFlags::trusted(),
+    //             b.ins().store(MemFlags::trusted(), v, p, *offset);
     //             None
     //         }
     //         InstKind::PtrAdd { ptr, index, stride } => {
@@ -969,14 +969,14 @@ impl<'a, M: Module> Codegen<'a, M> {
     //         }
     //         InstKind::PtrOffset { ptr, offset } => {
     //             let p = self.val(*ptr);
-    //  Some(b.ins().iadd_imm(p,
+    //             Some(b.ins().iadd_imm(p, *offset))
     //         }
     //
     //         InstKind::Binary { op, lhs, rhs } => {
     //             let a = self.val(*lhs);
     //             let c = self.val(*rhs);
     //             Some(match op {
-    // cai nay  binaryop::iadd =>
+    //                 BinaryOp::IAdd => b.ins().iadd(a, c),
     //                 BinaryOp::ISub => b.ins().isub(a, c),
     //                 BinaryOp::IMul => b.ins().imul(a, c),
     //                 BinaryOp::SDiv => b.ins().sdiv(a, c),   // trap o int.min/-1!!
@@ -984,14 +984,14 @@ impl<'a, M: Module> Codegen<'a, M> {
     //                 BinaryOp::FAdd => b.ins().fadd(a, c),
     //                 BinaryOp::FSub => b.ins().fsub(a, c),
     //                 BinaryOp::FMul => b.ins().fmul(a, c),
-    // cai nay  binaryop::fdiv =>
+    //                 BinaryOp::FDiv => b.ins().fdiv(a, c),
     //                 BinaryOp::BAnd => b.ins().band(a, c),
     //                 BinaryOp::BOr => b.ins().bor(a, c),
     //                 BinaryOp::BXor => b.ins().bxor(a, c),
     //                 _ => panic!("chua lam: {:?}", op),
     //             })
     //         }
-    //  InstKind::Unary { op,
+    //         InstKind::Unary { op, value } => {
     //             let v = self.val(*value);
     //             Some(match op {
     //                 UnaryOp::INeg => b.ins().ineg(v),
@@ -1023,7 +1023,7 @@ impl<'a, M: Module> Codegen<'a, M> {
     //         }
     //         InstKind::CallIndirect { callee, sig, args } => {
     //             let c = self.val(*callee);
-    // cai nay  let s
+    //             let s = self.sigs[sig.index()];
     //             let a: Vec<cl::Value> = args.iter().map(|v| self.val(*v)).collect();
     //             let call = b.ins().call_indirect(s, c, &a);
     //             b.inst_results(call).first().copied()
@@ -1050,8 +1050,8 @@ impl<'a, M: Module> Codegen<'a, M> {
     //         // may cai guard hoi do t chua lam, cu de no no ra roi tinh
     //         InstKind::BoundsCheck { .. } => None,
     //         InstKind::NullCheck { .. } => None,
-    //  InstKind::DivisorCheck { ...
-    // cai nay  instkind::shiftcountcheck {
+    //         InstKind::DivisorCheck { .. } => None,
+    //         InstKind::ShiftCountCheck { .. } => None,
     //
     //         other => panic!("gen_expr chua lam: {:?}", other),
     //     }
@@ -1065,7 +1065,7 @@ impl<'a, M: Module> Codegen<'a, M> {
     ) -> Result<Option<cl::Value>, CompileError> {
         let span = inst.span;
         let produced = match &inst.kind {
-            // ---- constants
+            // ---- constants ----
             InstKind::ConstInt(value) => Some(builder.ins().iconst(types::I64, *value)),
             InstKind::ConstFloat(value) => Some(builder.ins().f64const(*value)),
             InstKind::ConstBool(value) => Some(builder.ins().iconst(types::I64, i64::from(*value))),
@@ -1093,7 +1093,12 @@ impl<'a, M: Module> Codegen<'a, M> {
             }
             InstKind::ConstEnumSingleton { type_id, tag } => {
                 let id = *self.singletons.get(&(type_id.0, *tag)).ok_or_else(|| {
-                    failure_at( span, format!( "no singleton was emitted for variant {tag} of type {}", type_id.0 ),
+                    failure_at(
+                        span,
+                        format!(
+                            "no singleton was emitted for variant {tag} of type {}",
+                            type_id.0
+                        ),
                     )
                 })?;
                 Some(self.data_address(builder, frame, id))
@@ -1227,7 +1232,12 @@ impl<'a, M: Module> Codegen<'a, M> {
                     object,
                     abi::interface::ITABLE_OFFSET as i32,
                 );
-                let data = builder.ins().load( self.pointer_type, mem_flags(), object, abi::interface::DATA_OFFSET as i32, );
+                let data = builder.ins().load(
+                    self.pointer_type,
+                    mem_flags(),
+                    object,
+                    abi::interface::DATA_OFFSET as i32,
+                );
                 let method = builder.ins().load(
                     self.pointer_type,
                     mem_flags(),
@@ -1404,7 +1414,13 @@ impl<'a, M: Module> Codegen<'a, M> {
                 let cond = frame.value(*cond, span)?;
                 let then_args = frame.block_args(then_args, span)?;
                 let else_args = frame.block_args(else_args, span)?;
-                builder.ins().brif( cond, frame.blocks[then_block.index()], &then_args, frame.blocks[else_block.index()], &else_args, );
+                builder.ins().brif(
+                    cond,
+                    frame.blocks[then_block.index()],
+                    &then_args,
+                    frame.blocks[else_block.index()],
+                    &else_args,
+                );
             }
             Terminator::Switch {
                 value,
@@ -1540,7 +1556,10 @@ impl<'a, M: Module> Codegen<'a, M> {
         self.module
             .define_function(func_id, &mut context)
             .map_err(|error| {
-                failure(format!( "cannot compile `{}`: {error}", abi::SYMBOL_PROGRAM_MAIN ))
+                failure(format!(
+                    "cannot compile `{}`: {error}",
+                    abi::SYMBOL_PROGRAM_MAIN
+                ))
             })
     }
 
@@ -1583,7 +1602,11 @@ impl<'a, M: Module> Codegen<'a, M> {
 
             // dia chi mot bien cuc bo trong frame nay la dau xa cua khoang
             // ma GC quet kieu bao thu.
-            let anchor = builder.create_sized_stack_slot(cl::StackSlotData::new( cl::StackSlotKind::ExplicitSlot, abi::SLOT_SIZE, align_shift(abi::SLOT_SIZE), ));
+            let anchor = builder.create_sized_stack_slot(cl::StackSlotData::new(
+                cl::StackSlotKind::ExplicitSlot,
+                abi::SLOT_SIZE,
+                align_shift(abi::SLOT_SIZE),
+            ));
             let stack_bottom = builder.ins().stack_addr(self.pointer_type, anchor, 0);
 
             let table = self.data_address(&mut builder, &mut frame, type_table);
@@ -1698,6 +1721,13 @@ fn align_shift(align: u32) -> u8 {
     align.max(1).trailing_zeros() as u8
 }
 
+
+// TODO: bo cai nay di, viet ra roi khong dung
+fn dbg_dump(tag: &str, n: usize) {
+    if std::env::var("PUMP_DBG").is_ok() {
+        eprintln!("[{}] {}", tag, n);
+    }
+}
 fn signed_divide(b: &mut FunctionBuilder, lhs: cl::Value, rhs: cl::Value) -> cl::Value {
     // Cranelift trap o int.min / -1, Pump thi cuon ve int.min. Nen chia cho
     // -1 t doi thanh chia cho 1 roi tu doi dau lay thuong.
@@ -1724,3 +1754,164 @@ fn signed_remainder(b: &mut FunctionBuilder, lhs: cl::Value, rhs: cl::Value) -> 
 // gio toi den hai gio sang moi ra: t quen mat cai nhanh saturated, Cranelift
 // no che so dem theo do rong toan hang nen `x << 64` no tra lai dung `x`.
 // De nguyen may dong duoi nay, dung "don gian hoa" lai bang mot lenh ishl.
+fn shift(b: &mut FunctionBuilder, op: BinaryOp, lhs: cl::Value, count: cl::Value) -> cl::Value {
+    let ty = b.func.dfg.value_type(lhs);
+    let width = i64::from(ty.bits());
+    let masked = match op {
+        BinaryOp::Shl  => b.ins().ishl(lhs, count),
+        BinaryOp::AShr => b.ins().sshr(lhs, count),
+        BinaryOp::LShr => b.ins().ushr(lhs, count),
+        other => unreachable!("{other:?} is not a shift"),
+    };
+    let sat = match op {
+        // dich phai so hoc qua do rong thi con lai moi bit dau, boi ra ca tu.
+        BinaryOp::AShr => b.ins().sshr_imm(lhs, width - 1),
+        _ => b.ins().iconst(ty, 0),
+    };
+    let wide = b.ins().icmp_imm(IntCC::UnsignedGreaterThanOrEqual, count, width);
+    // println!("DBG: shift op={:?} width={}", op, width);
+    b.ins().select(wide, sat, masked)
+}
+
+fn integer_condition(op: CompareOp) -> Option<IntCC> {
+    Some(match op {
+        CompareOp::IEq => IntCC::Equal,
+        CompareOp::INe => IntCC::NotEqual,
+        CompareOp::SLt => IntCC::SignedLessThan,
+        CompareOp::SGt => IntCC::SignedGreaterThan,
+        CompareOp::SLe => IntCC::SignedLessThanOrEqual,
+        CompareOp::SGe => IntCC::SignedGreaterThanOrEqual,
+        CompareOp::ULt => IntCC::UnsignedLessThan,
+        CompareOp::UGt => IntCC::UnsignedGreaterThan,
+        CompareOp::ULe => IntCC::UnsignedLessThanOrEqual,
+        CompareOp::UGe => IntCC::UnsignedGreaterThanOrEqual,
+        _ => return None,
+    })
+}
+
+fn float_condition(op: CompareOp) -> FloatCC {
+    match op {
+        CompareOp::FEq => FloatCC::Equal,
+        // dung dang unordered, de `NaN != NaN` ra true.
+        CompareOp::FNe => FloatCC::NotEqual,
+        CompareOp::FLt => FloatCC::LessThan,
+        CompareOp::FGt => FloatCC::GreaterThan,
+        CompareOp::FLe => FloatCC::LessThanOrEqual,
+        CompareOp::FGe => FloatCC::GreaterThanOrEqual,
+        other => unreachable!("{other:?} is an integer comparison"),
+    }
+}
+
+fn write_descriptor(image: &mut Image, descriptor: &TypeDescriptor) {
+    let start = image.len();
+    image.u32(descriptor.kind as u32);
+    image.u32(descriptor.flags);
+    image.u64(descriptor.size);
+    image.u32(descriptor.ref_offsets.len() as u32);
+    image.u32(descriptor.variants.len() as u32);
+    image.u64(0);
+    image.u64(0);
+    image.u64(0);
+    debug_assert_eq!(image.len() - start, abi::TYPE_DESCRIPTOR_SIZE);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::{BlockRef, Signature};
+
+    fn span() -> Span {
+        Span::synthetic()
+    }
+
+    #[test]
+    fn alignments_become_power_of_two_exponents() {
+        assert_eq!(align_shift(1), 0);
+        assert_eq!(align_shift(4), 2);
+        assert_eq!(align_shift(8), 3);
+        assert_eq!(align_shift(16), 4);
+    }
+
+    #[test]
+    fn a_straight_line_function_keeps_its_block_order() {
+        let mut function = Function::new("f", Signature::new(Vec::new(), None), span());
+        let entry = function.entry;
+        let middle = function.new_block(span());
+        let exit = function.new_block(span());
+        function.set_terminator(
+            entry,
+            Terminator::Jump {
+                target: middle,
+                args: Vec::new(),
+            },
+        );
+        function.set_terminator(
+            middle,
+            Terminator::Jump {
+                target: exit,
+                args: Vec::new(),
+            },
+        );
+        function.set_terminator(exit, Terminator::Return { value: None });
+
+        assert_eq!(block_order(&function), vec![entry, middle, exit]);
+    }
+
+    #[test]
+    fn a_definition_is_ordered_before_its_use() {
+        // block dau nhay toi block SAU no, roi cai do lai roi vao block
+        // truoc, nen di theo thu tu chi so thi gap cho dung truoc cho dinh
+        // nghia.
+        let mut function = Function::new("f", Signature::new(Vec::new(), None), span());
+        let entry = function.entry;
+        let user = function.new_block(span());
+        let definer = function.new_block(span());
+        function.set_terminator(
+            entry,
+            Terminator::Jump {
+                target: definer,
+                args: Vec::new(),
+            },
+        );
+        function.set_terminator(
+            definer,
+            Terminator::Jump {
+                target: user,
+                args: Vec::new(),
+            },
+        );
+        function.set_terminator(user, Terminator::Return { value: None });
+
+        let order = block_order(&function);
+        let position = |block: BlockRef| order.iter().position(|&other| other == block).unwrap();
+        assert!(position(definer) < position(user));
+    }
+
+    #[test]
+    fn an_unreachable_block_is_still_translated() {
+        let mut function = Function::new("f", Signature::new(Vec::new(), None), span());
+        let entry = function.entry;
+        let orphan = function.new_block(span());
+        function.set_terminator(entry, Terminator::Return { value: None });
+
+        let order = block_order(&function);
+        assert_eq!(order.len(), 2);
+        assert!(order.contains(&orphan));
+    }
+
+    #[test]
+    fn a_descriptor_entry_is_forty_eight_bytes() {
+        let descriptor = TypeDescriptor {
+            type_id: abi::FIRST_USER_TYPE_ID,
+            kind: abi::DescriptorKind::Struct,
+            flags: 0,
+            size: 48,
+            ref_offsets: vec![32],
+            variants: Vec::new(),
+            name: "User".to_string(),
+        };
+        let mut image = Image::default();
+        write_descriptor(&mut image, &descriptor);
+        assert_eq!(image.len(), abi::TYPE_DESCRIPTOR_SIZE);
+    }
+}
