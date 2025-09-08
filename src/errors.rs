@@ -390,7 +390,7 @@ pub enum ErrorCode {
     BackslashOutsideImportPath = 436,
     // E0437 hoi truoc la "keyword viet hoa", kieu `IF` thi bao rieng mot cau.
     // Bo di tu luc chot Pump phan biet hoa thuong (D-4), gio `IF` chi la mot
-    // cai ten binh ...
+    // cai ten binh thuong thoi. De trong so 437, dung dung lai cho cai khac,
     // may file .err cu ngoai kia con ghi no.
     ReservedWord = 438,
     OperatorNotInPump = 439,
