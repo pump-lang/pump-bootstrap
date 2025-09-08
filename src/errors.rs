@@ -367,7 +367,7 @@ fn render_snippet(out: &mut String, label: &Label, sources: &SourceMap, primary:
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 #[repr(u16)]
 pub enum ErrorCode {
-    // ---- lexer, E0417 ...
+    // ---- lexer, E0417 - E0449 ----
     UnexpectedCharacter = 417,
     UnterminatedBlockComment = 418,
     UnterminatedString = 419,
