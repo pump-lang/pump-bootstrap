@@ -465,7 +465,7 @@ pub enum ErrorCode {
     UnusedLocal = 526,
     VariantVisibilityMismatch = 528,
 
-    // cai nay ---- type checker,
+    // ---- type checker, E0550 - E0649 ----
     TypeMismatch = 550,
     NotCallable = 551,
     WrongArgumentCount = 552,
