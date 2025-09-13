@@ -303,7 +303,12 @@ impl SourceMap {
 
 fn render_diagnostic(diagnostic: &CompileError, sources: &SourceMap) -> String {
     let mut out = String::new();
-    out.push_str(&format!( "{}[{}]: {}\n", diagnostic.severity.label(), diagnostic.code, diagnostic.message ));
+    out.push_str(&format!(
+        "{}[{}]: {}\n",
+        diagnostic.severity.label(),
+        diagnostic.code,
+        diagnostic.message
+    ));
     render_snippet(&mut out, &diagnostic.primary, sources, true);
     for label in &diagnostic.secondary {
         render_snippet(&mut out, label, sources, false);
