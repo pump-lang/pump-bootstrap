@@ -117,3 +117,80 @@ impl Session {
         self.diagnostics.render(&self.sources)
     }
 }
+
+/// Run the frontend and the lowering, gives back the IR of options.entry.
+pub fn compile_to_ir(session: &mut Session, options: &Options) -> Result<Program, CompileError> {
+    let entry_file = session.load(&options.entry)?;
+    let entry_text = session
+        .sources
+        .get(entry_file)
+        .expect("the entry file was just loaded")
+        .text
+        .clone();
+
+    let module_name = options
+        .entry
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "main".to_string());
+
+    let tokens = lexer::tokenize(entry_file, &entry_text, &mut session.diagnostics);
+    let unit = parser::parse(
+        entry_file,
+        vec![module_name],
+        &tokens,
+        &mut session.node_ids,
+        &mut session.diagnostics,
+    );
+
+    // file parse hong thi day cho trong do recovery de lai. Cho may pha sau
+    // chay tiep tren no chi ra them mot dong loi an theo chu khong biet them
+    // gi, nen cu het mot pha la dung neu da co loi.
+    if session.diagnostics.has_errors() {
+        return Err(stopped_early());
+    }
+
+    // module import thi resolver tu doc, tu lex, tu parse, vi no la pha duy
+    // nhat biet do thi import. No can &mut Session de ghi source map nen loi
+    // cua no roi vao mot cho khac, xong xuoi moi don nguoc lai vao day.
+    let mut resolver_diagnostics = Diagnostics::new();
+    let resolution = resolve::resolve(
+        vec![unit],
+        options.project_root(),
+        session,
+        &mut resolver_diagnostics,
+    );
+    session.diagnostics.extend(resolver_diagnostics);
+    let resolution = resolution?;
+    if session.diagnostics.has_errors() {
+        return Err(stopped_early());
+    }
+
+    let checked = check::check(resolution, &mut session.diagnostics)?;
+    if session.diagnostics.has_errors() {
+        return Err(stopped_early());
+    }
+
+    lower::lower(&checked)
+}
+
+fn stopped_early() -> CompileError {
+    CompileError::at(
+        ErrorCode::CompilationStopped,
+        Span::synthetic(),
+        String::new(),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_default_output_sits_beside_the_entry_file() {
+        let options = Options::new(Mode::Build, "examples/hello.pump");
+        let executable = options.executable_path();
+        assert_eq!(executable.parent().unwrap(), Path::new("examples"));
+        assert!(executable.file_stem().is_some_and(|stem| stem == "hello"));
+    }
+}

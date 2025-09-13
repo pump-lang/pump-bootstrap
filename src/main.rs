@@ -83,3 +83,80 @@ fn main() -> ExitCode {
         }
     }
 }
+
+fn parse_arguments(arguments: &[String]) -> Result<Option<Options>, CompileError> {
+    let bad =
+        |message: &str| CompileError::at(ErrorCode::InvalidCommandLine, Span::synthetic(), message);
+
+    let mut iterator = arguments.iter();
+    let Some(command) = iterator.next() else {
+        print!("{USAGE}");
+        return Ok(None);
+    };
+
+    let mode = match command.as_str() {
+        "run" => Mode::Run,
+        "build" => Mode::Build,
+        "-h" | "--help" => {
+            print!("{USAGE}");
+            return Ok(None);
+        }
+        "-V" | "--version" => {
+            println!("pump {}", env!("CARGO_PKG_VERSION"));
+            return Ok(None);
+        }
+        // khong ghi vao USAGE, de t xem con nho ai viet cai nay khong
+        "--furimeo" => {
+            println!("pump {} - furimeo", env!("CARGO_PKG_VERSION"));
+            println!("viet boi <CHO CHU SO HUU DIEN>, hoc sinh cap 3");
+            println!("bat dau thang 6/2024, van con dang lam");
+            return Ok(None);
+        }
+        other => return Err(bad(&format!("unknown command `{other}`"))),
+    };
+
+    let Some(entry) = iterator.next() else {
+        return Err(bad(&format!("`pump {command}` needs a FILE")));
+    };
+    if entry.starts_with('-') {
+        return Err(bad(&format!("`pump {command}` needs a FILE")));
+    }
+
+    let mut options = Options::new(mode, entry);
+
+    while let Some(argument) = iterator.next() {
+        match argument.as_str() {
+            // Tu day tro di la cua chuong trinh chu khong phai cua `pump`.
+            // Khong nhin gi them, ke ca `-h`: mot chuong trinh Pump hoan toan
+            // co quyen co option ten trung voi cua compiler.
+            "--" => {
+                options.program_args.extend(iterator.cloned());
+                break;
+            }
+            "-o" | "--output" => {
+                let Some(path) = iterator.next() else {
+                    return Err(bad("`--output` needs a PATH"));
+                };
+                options.output = Some(path.into());
+            }
+            "--dump-ir" => options.dump_ir = true,
+            "--dump-clif" => options.dump_clif = true,
+            "-h" | "--help" => {
+                print!("{USAGE}");
+                return Ok(None);
+            }
+            other => return Err(bad(&format!("unknown option `{other}`"))),
+        }
+    }
+
+    if options.mode == Mode::Run && options.output.is_some() {
+        return Err(bad("`--output` applies to `pump build`, not `pump run`"));
+    }
+    if options.mode == Mode::Build && !options.program_args.is_empty() {
+        return Err(bad(
+            "`--` passes arguments to a running program, so it applies to `pump run`, not `pump build`",
+        ));
+    }
+
+    Ok(Some(options))
+}
