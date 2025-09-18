@@ -1068,7 +1068,7 @@ impl<'a, M: Module> Codegen<'a, M> {
             // ---- constants ----
             InstKind::ConstInt(value) => Some(builder.ins().iconst(types::I64, *value)),
             InstKind::ConstFloat(value) => Some(builder.ins().f64const(*value)),
-            InstKind::ConstBool(value) => Some(builder.ins().iconst(types::I64, i64::from(*value))),
+            InstKind::ConstBool(value) => Some(builder.ins().iconst(types::I8, i64::from(*value))),
             InstKind::ConstChar(value) => Some(builder.ins().iconst(types::I32, i64::from(*value))),
             InstKind::ConstNull => Some(builder.ins().iconst(self.pointer_type, 0)),
             InstKind::ConstString(text) => {
