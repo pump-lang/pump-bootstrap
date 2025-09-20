@@ -1,4 +1,4 @@
-// cai nay bai tong hop,
+// bai tong hop, dung gan het Pump mot luot: struct co method, enum co payload,
 // match vet het nhanh, generic tu suy, interface theo cau truc, optional, loi
 // truyen len, va closure.
 //
@@ -79,4 +79,117 @@ struct Registry<T> {
         }
         return items[index]
     }
+}
+
+fn largest(shapes: [Shape]): Shape? {
+    if shapes.length == 0 {
+        return null
+    }
+    let best = shapes[0]
+    for shape in shapes {
+        if shape.area() > best.area() {
+            best = shape
+        }
+    }
+    return best
+}
+
+fn parse_scale(text: string): float! {
+    if text == "double" {
+        return 2.0
+    }
+    if text == "half" {
+        return 0.5
+    }
+    fail "unknown scale `{text}`"
+}
+
+fn scaled_total(shapes: [Shape], text: string): float! {
+    let factor = parse_scale(text)!
+    let total = 0.0
+    for shape in shapes {
+        total += shape.area() * factor
+    }
+    return total
+}
+
+fn run(command: Command, registry: Registry<Shape>) {
+    match command {
+        Command.Add(shape) => {
+            registry.add(shape)
+            io.println("added {shape.label()}")
+        }
+        Command.Scale(factor) => {
+            io.println("scale by {factor}")
+        }
+        Command.Report => {
+            io.println("registry holds {registry.count()} shapes")
+        }
+        Command.Quit => {
+            io.println("bye")
+        }
+    }
+}
+
+fn describe<T: Stringable>(prefix: string, value: T): string {
+    return "{prefix}: {value}"
+}
+
+fn main() {
+    let registry: Registry<Shape> = Registry { items: [] }
+
+    let commands: [Command] = [
+        Command.Add(Circle { radius: 1.0 }),
+        Command.Add(Rect { width: 3.0, height: 2.0 }),
+        Command.Add(Rect { width: 2.0, height: 2.0 }),
+        Command.Report,
+        Command.Scale(2.0),
+        Command.Quit,
+    ]
+
+    for command in commands {
+        run(command, registry)
+    }
+
+    let shapes = registry.items
+    let biggest = largest(shapes)
+    if biggest != null {
+        io.println("largest is {biggest.label()} at {biggest.area()}")
+    }
+
+    io.println("missing index: {registry.at(37) == null}")
+    let second = registry.at(1)
+    if second != null {
+        io.println("second is {second.label()}")
+    }
+
+    io.println("doubled total: {scaled_total(shapes, "double") catch -1.0}")
+    io.println("bad scale: {scaled_total(shapes, "triple") catch -1.0}")
+
+    // closure bat mot bien sua duoc.
+    let squares = 0
+    let tally = fn(rect: Rect) {
+        if rect.is_square() {
+            squares += 1
+        }
+    }
+    tally(Rect { width: 2.0, height: 2.0 })
+    tally(Rect { width: 3.0, height: 2.0 })
+    io.println("squares seen: {squares}")
+
+    let names: [string] = []
+    for shape in shapes {
+        names.push(shape.label())
+    }
+    io.println(describe("count", names.length))
+    io.println(describe("first", names[0]))
+
+    let by_label: [string: float] = {}
+    for shape in shapes {
+        by_label.insert(shape.label(), shape.area())
+    }
+    io.println("distinct labels: {by_label.length}")
+
+    let sizes = set{1, 2, 3, 2}
+    io.println("distinct sizes: {sizes.length}")
 }

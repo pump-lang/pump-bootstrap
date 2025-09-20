@@ -21,3 +21,33 @@ fn fib_iterative(n: int): int {
     }
     return previous
 }
+
+fn fib_memo(n: int, seen: [int: int]): int {
+    if n < 2 {
+        return n
+    }
+    let cached = seen.get(n)
+    if cached != null {
+        return cached
+    }
+    let value = fib_memo(n - 1, seen) + fib_memo(n - 2, seen)
+    seen.insert(n, value)
+    return value
+}
+
+fn main() {
+    print("recursive: ")
+    for n in 0..23 {
+        print("{fib_recursive(n)} ")
+    }
+    print("\n")
+
+    print("iterative: ")
+    for n in 0..23 {
+        print("{fib_iterative(n)} ")
+    }
+    print("\n")
+
+    let seen: [int: int] = {}
+    println("fib(71) = {fib_memo(71, seen)}")
+}
