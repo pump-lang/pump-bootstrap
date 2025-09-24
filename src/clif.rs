@@ -1721,13 +1721,6 @@ fn align_shift(align: u32) -> u8 {
     align.max(1).trailing_zeros() as u8
 }
 
-
-// TODO: bo cai nay di, viet ra roi khong dung
-fn dbg_dump(tag: &str, n: usize) {
-    if std::env::var("PUMP_DBG").is_ok() {
-        eprintln!("[{}] {}", tag, n);
-    }
-}
 fn signed_divide(b: &mut FunctionBuilder, lhs: cl::Value, rhs: cl::Value) -> cl::Value {
     // Cranelift trap o int.min / -1, Pump thi cuon ve int.min. Nen chia cho
     // -1 t doi thanh chia cho 1 roi tu doi dau lay thuong.
