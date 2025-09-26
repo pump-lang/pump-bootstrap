@@ -1,0 +1,76 @@
+// Exercises `io`. Output is what is under test here, so this program prints a
+// fixed transcript rather than asserting: run it and compare.
+//
+//     no newline -> newline
+//     42
+//     3.5
+//     true
+//     c
+//     (1, 2)
+//     one
+//     two
+//     1
+//     2
+//
+//     read its own source: true
+//     the first byte is a slash: true
+//     a file that is not there: caught
+//
+//     ok   io
+//
+// The write half needs somewhere to write, so it is tested in
+// tests/cases/os, where the harness hands the program a scratch directory.
+// What is exercised below is only reading, of this very file.
+
+import io
+import os
+import strings
+
+struct Point {
+    x: int
+    y: int
+
+    fn to_string(): string {
+        return "({x}, {y})"
+    }
+}
+
+// `catch` blocks have to leave the enclosing code (decision D-17), so the two
+// outcomes come back as a string.
+fn read_missing(path: string): string {
+    let text = io.read_text(path) catch error {
+        return "caught"
+    }
+    return "read {text.length} bytes, which it should not have"
+}
+
+fn main() {
+    io.print("no newline")
+    io.print(" -> ")
+    io.println("newline")
+
+    io.println(42)
+    io.println(3.5)
+    io.println(true)
+    io.println('c')
+    io.println(Point { x: 1, y: 2 })
+
+    io.println_all(["one", "two"])
+    io.println_all([1, 2])
+    io.println_all::<string>([])
+
+    io.blank_line()
+
+    // `pump run FILE` makes args()[0] the source file, so this program can
+    // read itself, which is the smallest honest test of the read path.
+    let own = os.args()[0]
+    let source = io.read_text(own) catch ""
+    io.println("read its own source: {strings.contains(source, "ok   io")}")
+
+    let bytes = io.read_bytes(own) catch []
+    io.println("the first byte is a slash: {bytes[0] == 47}")
+    io.println("a file that is not there: {read_missing("{own}.no-such-file")}")
+
+    io.blank_line()
+    io.println("ok   io")
+}

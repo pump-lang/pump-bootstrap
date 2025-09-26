@@ -34,3 +34,40 @@ fn tally(text: string): [string: int] {
     }
     return counts
 }
+
+fn sorted_entries(counts: [string: int]): [Entry] {
+    let entries: [Entry] = []
+    for word in counts.keys() {
+        entries.push(Entry { word: word, count: counts.get(word).or(0) })
+    }
+
+    // sap xep chen. Nhieu nhat truoc, bang nhau thi theo abc. O day it tu nen
+// khong can gi nhanh hon.
+    let i = 1
+    while i < entries.length {
+        let current = entries[i]
+        let j = i - 1
+        while j >= 0 && precedes(current, entries[j]) {
+            entries[j + 1] = entries[j]
+            j -= 1
+        }
+        entries[j + 1] = current
+        i += 1
+    }
+    return entries
+}
+
+fn precedes(a: Entry, b: Entry): bool {
+    if a.count != b.count {
+        return a.count > b.count
+    }
+    return a.word < b.word
+}
+
+fn main() {
+    let counts = tally(TEXT)
+    io.println("{counts.length} distinct words")
+    for entry in sorted_entries(counts) {
+        io.println(entry)
+    }
+}
