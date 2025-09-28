@@ -1,0 +1,109 @@
+// The `io` module: writing to standard output, and reading and writing files.
+//
+// `print` and `println` are already in the prelude (grammar 2.5.1). This
+// module exposes them under a name as well, so that the specification's
+// `import io` / `io.println(...)` spelling works.
+//
+// The bodies delegate to `io\raw` rather than calling the prelude directly: a
+// module-level `fn println` shadows the prelude throughout its own file, so
+// the call has to be made from a file that does not declare the name.
+//
+// Anything a `Stringable` value can be, this module can write: every
+// primitive, and any struct or enum with a `to_string(): string` method.
+//
+// The file half is new in this release, and it is the half a compiler written
+// in Pump cannot do without: `read_text` for a source file, `write_bytes` for
+// an object file. The four of them wrap the prelude builtins
+// `read_file_text`, `read_file_bytes`, `write_file_text` and
+// `write_file_bytes`, which report failure the way the runtime does - a null
+// or a `false`, with the reason left in `os_error()`. Nobody should have to
+// look at that: everything below fails with `T!` instead, so a missing file
+// is something `catch` handles and not something that kills the process.
+//
+// A whole file at a time, always. There is no open handle, no seek, no
+// streaming, and no append. Those need a `File` value with a lifetime, and
+// with `defer` still undecided (see TODO.txt) there is nothing good to close
+// it with yet.
+
+import io\raw
+
+// Writes a value with no trailing newline.
+pub fn print<T: Stringable>(value: T) {
+    raw.emit(value)
+}
+
+// Writes a value followed by a newline.
+pub fn println<T: Stringable>(value: T) {
+    raw.emit_line(value)
+}
+
+// Writes each value on a line of its own. An empty array writes nothing.
+pub fn println_all<T: Stringable>(values: [T]) {
+    for value in values {
+        raw.emit_line(value)
+    }
+}
+
+// Writes a newline on its own.
+pub fn blank_line() {
+    raw.emit_line("")
+}
+
+// -------------------------------------------------------------------------
+// Files
+// -------------------------------------------------------------------------
+
+// Reads a whole file and gives back its text. Fails when the file is not
+// there, cannot be opened, or does not hold valid UTF-8 - a Pump `string` is
+// UTF-8 by definition, so there is no lenient reading that quietly replaces
+// the bad bytes.
+pub fn read_text(path: string): string! {
+    let text = read_file_text(path)
+    if text != null {
+        return text
+    }
+    fail "cannot read `{path}`: {os_error()}"
+}
+
+// Reads a whole file as bytes, one array element per byte, each 0..255.
+//
+// Pump has no `u8` and `int` is 64 bit, so every byte costs a whole eight:
+// a megabyte on disk is eight megabytes of array. That is wasteful and known;
+// correctness first, and sized integers are a later release. Use `read_text`
+// whenever the file really is text.
+pub fn read_bytes(path: string): [int]! {
+    let bytes = read_file_bytes(path)
+    if bytes != null {
+        return bytes
+    }
+    fail "cannot read `{path}`: {os_error()}"
+}
+
+// Writes `text` to `path`, replacing anything already there and making the
+// file if it does not exist. The containing directory must exist.
+pub fn write_text(path: string, text: string): void! {
+    if write_file_text(path, text) {
+        return
+    }
+    fail "cannot write `{path}`: {os_error()}"
+}
+
+// Writes `bytes` to `path`, replacing anything already there.
+//
+// Every element must be a byte, 0..255. A value outside that is refused
+// rather than truncated: silently keeping the low eight bits would turn a
+// shift written the wrong way round into a file that is wrong and says
+// nothing about it. Mask with `& 0xff` yourself if that is what you meant.
+pub fn write_bytes(path: string, bytes: [int]): void! {
+    if write_file_bytes(path, bytes) {
+        return
+    }
+    fail "cannot write `{path}`: {os_error()}"
+}
+
+// True when the file can be read. There is no `stat` builtin, so this is the
+// read itself with the contents thrown away - do not use it to decide whether
+// to read, just read and catch.
+pub fn exists(path: string): bool {
+    return read_file_bytes(path) != null
+}

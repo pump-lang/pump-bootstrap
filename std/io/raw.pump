@@ -1,0 +1,10 @@
+// The prelude's `print` and `println`, reached from a file that does not
+// shadow either name. See `std/io.pump`.
+
+pub fn emit<T: Stringable>(value: T) {
+    print(value)
+}
+
+pub fn emit_line<T: Stringable>(value: T) {
+    println(value)
+}
