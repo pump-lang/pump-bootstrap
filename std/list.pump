@@ -1,0 +1,141 @@
+// Array helpers, generic over the element type.
+//
+// One rule holds throughout: nothing here mutates its argument. Every
+// function that produces a sequence returns a fresh array, so a caller can
+// pass the same input to several of them and get independent results. The
+// mutating operations already exist as builtins - `push`, `pop`, `reserve`
+// and index assignment - and this module does not duplicate them.
+//
+// Functions that may find nothing return `T?` rather than a sentinel, so the
+// caller has to say what an absent value means:
+//
+//     let widest = list.max_by(shapes, fn(a: Shape, b: Shape): bool {
+//         return a.width > b.width
+//     })
+//     io.println(widest.or(Shape { width: 0 }))
+//
+// Ordering is always supplied as a `precedes` callback rather than taken from
+// the element type, because Pump has no comparison bound to require. It must
+// be a strict order: `precedes(a, a)` is false, and if `precedes(a, b)` holds
+// then `precedes(b, a)` does not. `sort` is stable, so equal elements keep
+// their original relative order.
+
+pub fn is_empty<T>(items: [T]): bool {
+    return items.length == 0
+}
+
+pub fn first<T>(items: [T]): T? {
+    if items.length == 0 {
+        return null
+    }
+    return items[0]
+}
+
+pub fn last<T>(items: [T]): T? {
+    if items.length == 0 {
+        return null
+    }
+    return items[items.length - 1]
+}
+
+// -------------------------------------------------------------------------
+// Searching
+// -------------------------------------------------------------------------
+
+pub fn contains<T>(items: [T], needle: T): bool {
+    return index_of(items, needle) >= 0
+}
+
+// The index of the first element equal to `needle`, or -1.
+pub fn index_of<T>(items: [T], needle: T): int {
+    let index = 0
+    while index < items.length {
+        if items[index] == needle {
+            return index
+        }
+        index += 1
+    }
+    return -1
+}
+
+// The index of the last element equal to `needle`, or -1.
+pub fn last_index_of<T>(items: [T], needle: T): int {
+    let index = items.length - 1
+    while index >= 0 {
+        if items[index] == needle {
+            return index
+        }
+        index -= 1
+    }
+    return -1
+}
+
+// The first element the predicate accepts, or null.
+pub fn find<T>(items: [T], matches: fn(T): bool): T? {
+    for item in items {
+        if matches(item) {
+            return item
+        }
+    }
+    return null
+}
+
+// The index of the first element the predicate accepts, or -1.
+pub fn find_index<T>(items: [T], matches: fn(T): bool): int {
+    let index = 0
+    while index < items.length {
+        if matches(items[index]) {
+            return index
+        }
+        index += 1
+    }
+    return -1
+}
+
+pub fn any<T>(items: [T], matches: fn(T): bool): bool {
+    return find_index(items, matches) >= 0
+}
+
+pub fn all<T>(items: [T], matches: fn(T): bool): bool {
+    for item in items {
+        if !matches(item) {
+            return false
+        }
+    }
+    return true
+}
+
+pub fn count<T>(items: [T], matches: fn(T): bool): int {
+    let total = 0
+    for item in items {
+        if matches(item) {
+            total += 1
+        }
+    }
+    return total
+}
+
+// -------------------------------------------------------------------------
+// Transforming
+// -------------------------------------------------------------------------
+
+pub fn map<T, U>(items: [T], transform: fn(T): U): [U] {
+    let out: [U] = []
+    out.reserve(items.length)
+    for item in items {
+        out.push(transform(item))
+    }
+    return out
+}
+
+pub fn filter<T>(items: [T], keep: fn(T): bool): [T] {
+    let out: [T] = []
+    for item in items {
+        if keep(item) {
+            out.push(item)
+        }
+    }
+    return out
+}
+
+// Folds left: `step` is applied to the accumulator and each element in turn.

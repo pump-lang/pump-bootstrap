@@ -1,0 +1,128 @@
+import io
+import list
+
+fn check(label: string, actual: bool) {
+    if actual {
+        io.println("ok   {label}")
+    } else {
+        io.println("FAIL {label}")
+    }
+}
+
+fn ascending(a: int, b: int): bool {
+    return a < b
+}
+
+fn descending(a: int, b: int): bool {
+    return a > b
+}
+
+fn same(a: [int], b: [int]): bool {
+    if a.length != b.length {
+        return false
+    }
+    let index = 0
+    while index < a.length {
+        if a[index] != b[index] {
+            return false
+        }
+        index += 1
+    }
+    return true
+}
+
+fn shuffled(count: int): [int] {
+    // A deterministic pseudo-random permutation source: enough disorder to
+    // exercise the merge, without needing a random number generator.
+    let out: [int] = []
+    let state = 12345
+    for _ in 0..count {
+        state = (state * 1103515245 + 12345) % 100003
+        out.push(state)
+    }
+    return out
+}
+
+fn main() {
+    let numbers = [4, 1, 3, 1, 5]
+    let empty: [int] = []
+
+    check("is_empty", list.is_empty(empty) && !list.is_empty(numbers))
+    check("first", list.first(numbers).or(-1) == 4 && list.first(empty).or(-1) == -1)
+    check("last", list.last(numbers).or(-1) == 5 && list.last(empty).or(-1) == -1)
+
+    check("contains", list.contains(numbers, 3) && !list.contains(numbers, 9))
+    check("index_of", list.index_of(numbers, 1) == 1 && list.index_of(numbers, 9) == -1)
+    check("last_index_of", list.last_index_of(numbers, 1) == 3)
+
+    check("find", list.find(numbers, fn(x: int): bool { return x > 3 }).or(0) == 4)
+    check("find none", list.find(numbers, fn(x: int): bool { return x > 9 }).or(0) == 0)
+    check("find_index", list.find_index(numbers, fn(x: int): bool { return x == 5 }) == 4)
+    check("any", list.any(numbers, fn(x: int): bool { return x == 5 }))
+    check("all", list.all(numbers, fn(x: int): bool { return x > 0 }))
+    check("all empty", list.all(empty, fn(x: int): bool { return false }))
+    check("count", list.count(numbers, fn(x: int): bool { return x == 1 }) == 2)
+
+    check("map", same(list.map(numbers, fn(x: int): int { return x * 2 }), [8, 2, 6, 2, 10]))
+    check("map types", list.map(numbers, fn(x: int): string { return "{x}" })[0] == "4")
+    check("filter", same(list.filter(numbers, fn(x: int): bool { return x > 2 }), [4, 3, 5]))
+    check("reduce", list.reduce(numbers, 0, fn(a: int, x: int): int { return a + x }) == 14)
+    check("reduce types", list.reduce(numbers, "", fn(a: string, x: int): string { return a + "{x}" }) == "41315")
+    check("reverse", same(list.reverse(numbers), [5, 1, 3, 1, 4]))
+    check("reverse empty", list.reverse(empty).length == 0)
+
+    check("take", same(list.take(numbers, 2), [4, 1]))
+    check("take over", same(list.take(numbers, 99), numbers))
+    check("take negative", list.take(numbers, -3).length == 0)
+    check("drop", same(list.drop(numbers, 3), [1, 5]))
+    check("drop over", list.drop(numbers, 99).length == 0)
+
+    check("concat", same(list.concat([[1, 2], [], [3]]), [1, 2, 3]))
+    check("concat empty", list.concat::<int>([[], []]).length == 0)
+    check("unique", same(list.unique(numbers), [4, 1, 3, 5]))
+
+    check("min_by", list.min_by(numbers, ascending).or(0) == 1)
+    check("max_by", list.max_by(numbers, ascending).or(0) == 5)
+    check("min_by empty", list.min_by(empty, ascending).or(-1) == -1)
+
+    check("sort", same(list.sort(numbers, ascending), [1, 1, 3, 4, 5]))
+    check("sort down", same(list.sort(numbers, descending), [5, 4, 3, 1, 1]))
+    check("sort empty", list.sort(empty, ascending).length == 0)
+    check("sort one", same(list.sort([7], ascending), [7]))
+    check("sort leaves source alone", same(numbers, [4, 1, 3, 1, 5]))
+    check("is_sorted", list.is_sorted(list.sort(numbers, ascending), ascending))
+    check("is_sorted no", !list.is_sorted(numbers, ascending))
+
+    let big = shuffled(500)
+    let ordered = list.sort(big, ascending)
+    check("sort big", list.is_sorted(ordered, ascending) && ordered.length == 500)
+    check("sort big keeps values", list.reduce(ordered, 0, fn(a: int, x: int): int { return a + x })
+        == list.reduce(big, 0, fn(a: int, x: int): int { return a + x }))
+
+    check("sort strings", list.sort(["pear", "apple", "fig"], fn(a: string, b: string): bool {
+        return a < b
+    })[0] == "apple")
+
+    check("sort is stable", stable_ok())
+}
+
+struct Pair {
+    key: int
+    tag: string
+}
+
+fn stable_ok(): bool {
+    let pairs = [
+        Pair { key: 1, tag: "a" },
+        Pair { key: 0, tag: "b" },
+        Pair { key: 1, tag: "c" },
+        Pair { key: 0, tag: "d" },
+        Pair { key: 1, tag: "e" },
+    ]
+    let sorted = list.sort(pairs, fn(a: Pair, b: Pair): bool { return a.key < b.key })
+    let tags = ""
+    for pair in sorted {
+        tags += pair.tag
+    }
+    return tags == "bdace"
+}
