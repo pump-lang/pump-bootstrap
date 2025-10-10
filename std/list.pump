@@ -139,3 +139,164 @@ pub fn filter<T>(items: [T], keep: fn(T): bool): [T] {
 }
 
 // Folds left: `step` is applied to the accumulator and each element in turn.
+pub fn reduce<T, A>(items: [T], initial: A, step: fn(A, T): A): A {
+    let accumulator = initial
+    for item in items {
+        accumulator = step(accumulator, item)
+    }
+    return accumulator
+}
+
+pub fn reverse<T>(items: [T]): [T] {
+    let out: [T] = []
+    out.reserve(items.length)
+    let index = items.length - 1
+    while index >= 0 {
+        out.push(items[index])
+        index -= 1
+    }
+    return out
+}
+
+// The first `count` elements, or all of them if there are fewer. A negative
+// count yields an empty array.
+pub fn take<T>(items: [T], count: int): [T] {
+    return items.slice(0, bound(count, items.length))
+}
+
+// Everything after the first `count` elements.
+pub fn drop<T>(items: [T], count: int): [T] {
+    return items.slice(bound(count, items.length), items.length)
+}
+
+// Every group end to end, in order. `a.concat(b)` is the builtin for two
+// arrays; this is the form for a whole array of them.
+pub fn concat<T>(groups: [[T]]): [T] {
+    let total = 0
+    for group in groups {
+        total += group.length
+    }
+
+    let out: [T] = []
+    out.reserve(total)
+    for group in groups {
+        for item in group {
+            out.push(item)
+        }
+    }
+    return out
+}
+
+// Drops later duplicates, keeping the first occurrence of each value and the
+// order they first appeared in.
+//
+// This compares every candidate against everything kept so far, which is
+// quadratic. Pump has no bound that would let a generic function build a
+// `set<T>`, so there is no linear version to write here; for large inputs
+// with a concrete element type, build the set directly at the call site.
+pub fn unique<T>(items: [T]): [T] {
+    let out: [T] = []
+    for item in items {
+        if index_of(out, item) < 0 {
+            out.push(item)
+        }
+    }
+    return out
+}
+
+// -------------------------------------------------------------------------
+// Ordering
+// -------------------------------------------------------------------------
+
+// The smallest element under `precedes`, or null when there is none.
+pub fn min_by<T>(items: [T], precedes: fn(T, T): bool): T? {
+    if items.length == 0 {
+        return null
+    }
+
+    let best = items[0]
+    for item in items {
+        if precedes(item, best) {
+            best = item
+        }
+    }
+    return best
+}
+
+// The largest element under `precedes`, or null when there is none.
+pub fn max_by<T>(items: [T], precedes: fn(T, T): bool): T? {
+    if items.length == 0 {
+        return null
+    }
+
+    let best = items[0]
+    for item in items {
+        if precedes(best, item) {
+            best = item
+        }
+    }
+    return best
+}
+
+pub fn is_sorted<T>(items: [T], precedes: fn(T, T): bool): bool {
+    let index = 1
+    while index < items.length {
+        if precedes(items[index], items[index - 1]) {
+            return false
+        }
+        index += 1
+    }
+    return true
+}
+
+// A new array in ascending order under `precedes`. Merge sort: stable, and
+// n log n on every input rather than only on lucky ones.
+pub fn sort<T>(items: [T], precedes: fn(T, T): bool): [T] {
+    if items.length <= 1 {
+        return items.slice(0, items.length)
+    }
+
+    let middle = items.length / 2
+    let left = sort(items.slice(0, middle), precedes)
+    let right = sort(items.slice(middle, items.length), precedes)
+    return merge(left, right, precedes)
+}
+
+// Interleaves two already-sorted arrays. Taking from the left whenever the
+// right does not strictly precede it is what makes `sort` stable.
+fn merge<T>(left: [T], right: [T], precedes: fn(T, T): bool): [T] {
+    let out: [T] = []
+    out.reserve(left.length + right.length)
+
+    let i = 0
+    let j = 0
+    while i < left.length && j < right.length {
+        if precedes(right[j], left[i]) {
+            out.push(right[j])
+            j += 1
+        } else {
+            out.push(left[i])
+            i += 1
+        }
+    }
+    while i < left.length {
+        out.push(left[i])
+        i += 1
+    }
+    while j < right.length {
+        out.push(right[j])
+        j += 1
+    }
+    return out
+}
+
+// Clamps an offset supplied by a caller to a valid slice boundary.
+fn bound(offset: int, length: int): int {
+    if offset < 0 {
+        return 0
+    }
+    if offset > length {
+        return length
+    }
+    return offset
+}

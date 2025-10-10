@@ -1,0 +1,74 @@
+import io
+import math
+
+fn check(label: string, actual: bool) {
+    if actual {
+        io.println("ok   {label}")
+    } else {
+        io.println("FAIL {label}")
+    }
+}
+
+fn near(a: float, b: float): bool {
+    return math.abs(a - b) <= 1e-12 * math.max(1.0, math.abs(b))
+}
+
+fn squares_ok(): bool {
+    for i in 1..200 {
+        let root = math.sqrt(float(i * i))
+        if root != float(i) {
+            io.println("  sqrt({i * i}) = {root}")
+            return false
+        }
+    }
+    return true
+}
+
+fn main() {
+    check("abs", math.abs(-1.5) == 1.5 && math.abs(1.5) == 1.5)
+    check("abs zero", math.abs(-0.0) == 0.0)
+    check("abs nan", math.is_nan(math.abs(math.NAN)))
+    check("abs_int", math.abs_int(-7) == 7 && math.abs_int(7) == 7)
+    check("abs_int min", math.abs_int(math.INT_MIN) == math.INT_MIN)
+
+    check("min/max", math.min(2.0, 3.0) == 2.0 && math.max(2.0, 3.0) == 3.0)
+    check("min nan", math.is_nan(math.min(math.NAN, 1.0)) && math.is_nan(math.min(1.0, math.NAN)))
+    check("min_int/max_int", math.min_int(-2, 3) == -2 && math.max_int(-2, 3) == 3)
+    check("clamp", math.clamp(5.0, 0.0, 1.0) == 1.0 && math.clamp(-5.0, 0.0, 1.0) == 0.0)
+    check("clamp_int", math.clamp_int(5, 0, 1) == 1 && math.clamp_int(0, 0, 1) == 0)
+
+    check("sign", math.sign(-2.0) == -1.0 && math.sign(0.0) == 0.0 && math.sign(2.0) == 1.0)
+    check("sign_int", math.sign_int(-2) == -1 && math.sign_int(0) == 0)
+
+    check("trunc", math.trunc(3.7) == 3.0 && math.trunc(-3.7) == -3.0)
+    check("floor", math.floor(3.7) == 3.0 && math.floor(-3.2) == -4.0 && math.floor(4.0) == 4.0)
+    check("ceil", math.ceil(3.2) == 4.0 && math.ceil(-3.7) == -3.0 && math.ceil(4.0) == 4.0)
+    check("round", math.round(2.5) == 3.0 && math.round(-2.5) == -3.0 && math.round(2.4) == 2.0)
+    check("round edge", math.round(0.49999999999999994) == 0.0)
+    check("round big", math.round(1e300) == 1e300)
+    check("floor inf", math.floor(math.INFINITY) == math.INFINITY)
+    check("floor nan", math.is_nan(math.floor(math.NAN)))
+
+    check("sqrt 4", math.sqrt(4.0) == 2.0)
+    check("sqrt 2", near(math.sqrt(2.0), 1.4142135623730951))
+    check("sqrt 1e300", near(math.sqrt(1e300), 1e150))
+    check("sqrt tiny", near(math.sqrt(1e-300), 1e-150))
+    check("sqrt 0", math.sqrt(0.0) == 0.0)
+    check("sqrt neg", math.is_nan(math.sqrt(-1.0)))
+    check("sqrt inf", math.sqrt(math.INFINITY) == math.INFINITY)
+    check("sqrt squares", squares_ok())
+
+    check("pow", math.pow(2.0, 10) == 1024.0)
+    check("pow zero", math.pow(2.0, 0) == 1.0)
+    check("pow neg", math.pow(2.0, -2) == 0.25)
+    check("pow int min", math.pow(2.0, math.INT_MIN) == 0.0)
+    check("pow_int", math.pow_int(2, 10) == 1024 && math.pow_int(3, 3) == 27)
+    check("pow_int zero", math.pow_int(5, 0) == 1)
+
+    check("hypot", math.hypot(3.0, 4.0) == 5.0)
+    check("hypot big", near(math.hypot(3e200, 4e200), 5e200))
+    check("hypot zero", math.hypot(0.0, 0.0) == 0.0)
+
+    check("is_finite", math.is_finite(1.0) && !math.is_finite(math.INFINITY) && !math.is_finite(math.NAN))
+    check("constants", near(math.TAU, 2.0 * math.PI))
+}
