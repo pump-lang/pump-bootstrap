@@ -1,0 +1,270 @@
+// Numeric helpers.
+//
+// Pump has no numeric generics and no overloading, so this module follows one
+// naming rule: a plain name works on `float`, and the `_int` suffix marks the
+// `int` twin. `math.abs(-1.5)` is a float; `math.abs_int(-1)` is an int.
+//
+// Every function here is total. Nothing panics except `pow_int`, which
+// rejects a negative exponent because there is no integer answer to give.
+// NaN is contagious: any function handed a NaN returns NaN rather than
+// silently ordering it against real numbers.
+
+pub const PI: float = 3.141592653589793
+pub const TAU: float = 6.283185307179586
+pub const E: float = 2.718281828459045
+
+// `float` has no literal for these, so they are built from arithmetic the
+// language defines: dividing a float by zero overflows to infinity rather
+// than panicking, and infinity minus infinity is NaN.
+pub const INFINITY: float = 1.0 / 0.0
+pub const NAN: float = INFINITY - INFINITY
+
+pub const INT_MAX: int = 9223372036854775807
+pub const INT_MIN: int = -INT_MAX - 1
+
+// 2^52. Every float at or above this magnitude is already a whole number, so
+// `trunc`, `floor`, `ceil` and `round` can hand it back untouched. Below it
+// the value fits an `int` exactly and the conversion does the work.
+const INTEGRAL_LIMIT: float = 4503599627370496.0
+
+// Newton's method for `sqrt` doubles the number of correct digits each pass.
+// From the starting guess below, six passes reach full double precision on
+// the reduced range; eight leaves room to spare.
+const SQRT_STEPS: int = 8
+
+pub fn is_nan(x: float): bool {
+    // NaN is the only value that is not equal to itself.
+    return x != x
+}
+
+pub fn is_infinite(x: float): bool {
+    return x == INFINITY || x == -INFINITY
+}
+
+pub fn is_finite(x: float): bool {
+    return !is_nan(x) && !is_infinite(x)
+}
+
+pub fn abs(x: float): float {
+    if x < 0.0 {
+        return -x
+    }
+    if x == 0.0 {
+        // Holds for both zeroes, and normalises -0.0 to 0.0.
+        return 0.0
+    }
+    return x
+}
+
+// Wraps at the smallest int: `abs_int(INT_MIN)` is `INT_MIN`, because
+// `-INT_MIN` has no representation.
+pub fn abs_int(x: int): int {
+    if x < 0 {
+        return -x
+    }
+    return x
+}
+
+pub fn min(a: float, b: float): float {
+    if is_nan(a) || is_nan(b) {
+        return NAN
+    }
+    if a < b {
+        return a
+    }
+    return b
+}
+
+pub fn max(a: float, b: float): float {
+    if is_nan(a) || is_nan(b) {
+        return NAN
+    }
+    if a > b {
+        return a
+    }
+    return b
+}
+
+pub fn min_int(a: int, b: int): int {
+    if a < b {
+        return a
+    }
+    return b
+}
+
+pub fn max_int(a: int, b: int): int {
+    if a > b {
+        return a
+    }
+    return b
+}
+
+// Pulls `x` into `[low, high]`. An empty range, where `low` exceeds `high`,
+// yields `high`.
+pub fn clamp(x: float, low: float, high: float): float {
+    return min(max(x, low), high)
+}
+
+pub fn clamp_int(x: int, low: int, high: int): int {
+    return min_int(max_int(x, low), high)
+}
+
+// -1.0, 0.0 or 1.0. Both zeroes give 0.0 and NaN gives NaN.
+pub fn sign(x: float): float {
+    if is_nan(x) {
+        return NAN
+    }
+    if x > 0.0 {
+        return 1.0
+    }
+    if x < 0.0 {
+        return -1.0
+    }
+    return 0.0
+}
+
+pub fn sign_int(x: int): int {
+    if x > 0 {
+        return 1
+    }
+    if x < 0 {
+        return -1
+    }
+    return 0
+}
+
+// Towards zero.
+pub fn trunc(x: float): float {
+    if is_nan(x) || abs(x) >= INTEGRAL_LIMIT {
+        return x
+    }
+    return float(int(x))
+}
+
+// Towards negative infinity.
+pub fn floor(x: float): float {
+    let whole = trunc(x)
+    if whole > x {
+        return whole - 1.0
+    }
+    return whole
+}
+
+// Towards positive infinity.
+pub fn ceil(x: float): float {
+    let whole = trunc(x)
+    if whole < x {
+        return whole + 1.0
+    }
+    return whole
+}
+
+// To the nearest whole number, halves away from zero.
+pub fn round(x: float): float {
+    if is_nan(x) || abs(x) >= INTEGRAL_LIMIT {
+        return x
+    }
+    if x < 0.0 {
+        return -round(-x)
+    }
+
+    // Comparing the fraction against a half, rather than flooring `x + 0.5`,
+    // avoids the classic bug where that addition rounds up on its own. The
+    // victim is 0.49999999999999994, which must give 0.0 and not 1.0. The
+    // subtraction below is exact for every non-negative `x`.
+    let whole = floor(x)
+    if x - whole >= 0.5 {
+        return whole + 1.0
+    }
+    return whole
+}
+
+// The non-negative square root. Negative input gives NaN, as IEEE 754 says.
+pub fn sqrt(x: float): float {
+    if is_nan(x) || x < 0.0 {
+        return NAN
+    }
+    if x == 0.0 || x == INFINITY {
+        return x
+    }
+
+    // Divide out powers of four until the value sits in [0.25, 4.0), where a
+    // fixed number of Newton passes is enough. Every step is exact, and the
+    // scale cannot overflow because it tracks the magnitude of the answer.
+    let value = x
+    let scale = 1.0
+    while value >= 4.0 {
+        value /= 4.0
+        scale *= 2.0
+    }
+    while value < 0.25 {
+        value *= 4.0
+        scale /= 2.0
+    }
+
+    let guess = (value + 1.0) / 2.0
+    for _ in 0..SQRT_STEPS {
+        guess = (guess + value / guess) / 2.0
+    }
+    return guess * scale
+}
+
+// `base` raised to an integer power, by squaring.
+pub fn pow(base: float, exponent: int): float {
+    if exponent < 0 {
+        // Negating INT_MIN would overflow, so peel one factor off first.
+        return 1.0 / (pow(base, -(exponent + 1)) * base)
+    }
+
+    let result = 1.0
+    let factor = base
+    let remaining = exponent
+    while remaining > 0 {
+        if remaining % 2 == 1 {
+            result *= factor
+        }
+        remaining /= 2
+        if remaining > 0 {
+            factor *= factor
+        }
+    }
+    return result
+}
+
+// The integer form. Panics on a negative exponent, which has no integer
+// answer; overflow wraps, exactly as it does for `*`.
+pub fn pow_int(base: int, exponent: int): int {
+    if exponent < 0 {
+        panic("math.pow_int: the exponent must not be negative")
+    }
+
+    let result = 1
+    let factor = base
+    let remaining = exponent
+    while remaining > 0 {
+        if remaining % 2 == 1 {
+            result *= factor
+        }
+        remaining /= 2
+        if remaining > 0 {
+            factor *= factor
+        }
+    }
+    return result
+}
+
+// The length of the hypotenuse, without the overflow that squaring both sides
+// directly would cause for large inputs.
+pub fn hypot(a: float, b: float): float {
+    let wide = max(abs(a), abs(b))
+    let narrow = min(abs(a), abs(b))
+    if wide == 0.0 {
+        return 0.0
+    }
+    if is_infinite(wide) {
+        return INFINITY
+    }
+
+    let ratio = narrow / wide
+    return wide * sqrt(1.0 + ratio * ratio)
+}

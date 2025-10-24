@@ -1,0 +1,138 @@
+import io
+import strings
+
+fn check(label: string, actual: bool) {
+    if actual {
+        io.println("ok   {label}")
+    } else {
+        io.println("FAIL {label}")
+    }
+}
+
+fn same(a: [string], b: [string]): bool {
+    if a.length != b.length {
+        return false
+    }
+    let index = 0
+    while index < a.length {
+        if a[index] != b[index] {
+            return false
+        }
+        index += 1
+    }
+    return true
+}
+
+fn int_ok(text: string, expected: int): bool {
+    let value = strings.to_int(text) catch {
+        return false
+    }
+    return value == expected
+}
+
+fn int_bad(text: string): bool {
+    let value = strings.to_int(text) catch {
+        return true
+    }
+    io.println("  to_int({text}) unexpectedly gave {value}")
+    return false
+}
+
+fn float_ok(text: string, expected: float): bool {
+    let value = strings.to_float(text) catch {
+        return false
+    }
+    if value == expected {
+        return true
+    }
+    io.println("  to_float({text}) gave {value}, wanted {expected}")
+    return false
+}
+
+fn float_bad(text: string): bool {
+    let value = strings.to_float(text) catch {
+        return true
+    }
+    io.println("  to_float({text}) unexpectedly gave {value}")
+    return false
+}
+
+fn main() {
+    check("is_empty", strings.is_empty("") && !strings.is_empty("a"))
+    check("is_blank", strings.is_blank("  \t\n") && !strings.is_blank(" a "))
+
+    check("index_of", strings.index_of("banana", "na") == 2)
+    check("index_of miss", strings.index_of("banana", "z") == -1)
+    check("index_of empty", strings.index_of("banana", "") == 0)
+    check("last_index_of", strings.last_index_of("banana", "na") == 4)
+    check("contains", strings.contains("banana", "nan") && !strings.contains("banana", "nb"))
+    check("starts_with", strings.starts_with("banana", "ban") && !strings.starts_with("ban", "banana"))
+    check("ends_with", strings.ends_with("banana", "ana") && !strings.ends_with("banana", "anb"))
+    check("count", strings.count("banana", "na") == 2 && strings.count("aaaa", "aa") == 2)
+    check("count empty", strings.count("banana", "") == 0)
+
+    check("split", same(strings.split("a,b,,c", ","), ["a", "b", "", "c"]))
+    check("split none", same(strings.split("abc", ","), ["abc"]))
+    check("split empty sep", same(strings.split("abc", ""), ["abc"]))
+    check("split long sep", same(strings.split("ab", "abcd"), ["ab"]))
+    check("split edges", same(strings.split(",a,", ","), ["", "a", ""]))
+    check("split_whitespace", same(strings.split_whitespace("  the  quick \t fox "), ["the", "quick", "fox"]))
+    check("split_whitespace empty", strings.split_whitespace("   ").length == 0)
+    check("lines", same(strings.lines("a\nb\r\nc"), ["a", "b", "c"]))
+    check("lines trailing", same(strings.lines("a\nb\n"), ["a", "b"]))
+    check("lines empty", strings.lines("").length == 0)
+
+    check("concat", strings.concat(["a", "b", "c"]) == "abc")
+    check("concat empty", strings.concat([]) == "")
+    check("concat one", strings.concat(["solo"]) == "solo")
+    check("join", strings.join(["a", "b", "c"], "-") == "a-b-c")
+    check("join one", strings.join(["a"], "-") == "a")
+    check("join none", strings.join([], "-") == "")
+    check("replace", strings.replace("banana", "na", "NA") == "baNANA")
+    check("replace missing", strings.replace("banana", "z", "!") == "banana")
+    check("replace empty", strings.replace("banana", "", "!") == "banana")
+
+    check("repeat", strings.repeat("ab", 3) == "ababab")
+    check("repeat zero", strings.repeat("ab", 0) == "")
+    check("repeat negative", strings.repeat("ab", -2) == "")
+    check("repeat one", strings.repeat("ab", 1) == "ab")
+    check("repeat many", strings.repeat("x", 1000).length == 1000)
+
+    check("pad_start", strings.pad_start("7", 3) == "  7")
+    check("pad_start fill", strings.pad_start("7", 3, '0') == "007")
+    check("pad_start wide", strings.pad_start("hello", 3) == "hello")
+    check("pad_end", strings.pad_end("7", 3) == "7  ")
+    check("pad_end fill", strings.pad_end("7", 3, '.') == "7..")
+
+    check("reverse", strings.reverse("abc") == "cba")
+    check("reverse unicode", strings.reverse("añb") == "bña")
+    check("reverse empty", strings.reverse("") == "")
+
+    check("trim", strings.trim("  hi \t ") == "hi")
+    check("trim_start", strings.trim_start("  hi  ") == "hi  ")
+    check("trim_end", strings.trim_end("  hi  ") == "  hi")
+    check("trim all space", strings.trim("   ") == "")
+
+    check("to_upper", strings.to_upper("Hello, world! 42") == "HELLO, WORLD! 42")
+    check("to_lower", strings.to_lower("Hello, WORLD! 42") == "hello, world! 42")
+    check("case keeps unicode", strings.to_upper("añb") == "AñB")
+    check("case empty", strings.to_upper("") == "")
+
+    check("to_int", int_ok("0", 0) && int_ok("42", 42) && int_ok("-42", -42) && int_ok("+7", 7))
+    check("to_int max", int_ok("9223372036854775807", 9223372036854775807))
+    check("to_int min", int_ok("-9223372036854775808", -9223372036854775807 - 1))
+    check("to_int overflow", int_bad("9223372036854775808"))
+    check("to_int underflow", int_bad("-9223372036854775809"))
+    check("to_int huge", int_bad("99999999999999999999999"))
+    check("to_int junk", int_bad("") && int_bad("-") && int_bad("1a") && int_bad(" 1") && int_bad("1.0"))
+    check("to_int leading zeros", int_ok("007", 7))
+
+    check("to_float ints", float_ok("0", 0.0) && float_ok("42", 42.0) && float_ok("-42", -42.0))
+    check("to_float fraction", float_ok("2.5", 2.5) && float_ok("-0.125", -0.125))
+    check("to_float exponent", float_ok("1e3", 1000.0) && float_ok("1.5e-3", 0.0015))
+    check("to_float big", float_ok("6.02e23", 6.02e23))
+    check("to_float plus exp", float_ok("2e+2", 200.0))
+    check("to_float junk", float_bad("") && float_bad(".") && float_bad("1e") && float_bad("abc") && float_bad("1.2.3"))
+
+    check("round trip", int_ok("{12345}", 12345))
+}
