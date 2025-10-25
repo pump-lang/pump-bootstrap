@@ -29,3 +29,11 @@ pub struct Square {
 
 implements Circle: Shape
 implements Square: Shape
+
+pub fn area<T: Shape>(shape: T): float {
+    return shape.area()
+}
+
+pub fn render<T: Shape>(shape: T): string {
+    return "{shape.name()} of {shape.area()}"
+}
