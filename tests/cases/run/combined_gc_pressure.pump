@@ -46,3 +46,24 @@ fn churn(rounds: int): int {
     }
     return survivors.length
 }
+
+fn main() {
+    let list = build(1000)
+    io.println(total(list))
+
+    io.println(churn(1000))
+
+    // The list built before the churn is still intact afterwards.
+    io.println(total(list))
+
+    let tables: [[string: int]] = []
+    for i in 0..50 {
+        let table: [string: int] = {}
+        for j in 0..20 {
+            table.insert("k{j}", i * j)
+        }
+        tables.push(table)
+    }
+    io.println(tables.length)
+    io.println(tables[49]["k19"])
+}

@@ -47,3 +47,19 @@ fn show(expression: Expr): string {
     }
     return string(value)
 }
+
+fn report(expression: Expr) {
+    io.println("{render(expression)} = {show(expression)}")
+}
+
+fn main() {
+    let one = Expr.Number(1)
+    let two = Expr.Number(2)
+    let three = Expr.Number(3)
+
+    report(Expr.Add(one, two))
+    report(Expr.Mul(Expr.Add(one, two), three))
+    report(Expr.Sub(three, Expr.Neg(two)))
+    report(Expr.Div(Expr.Number(10), two))
+    report(Expr.Div(one, Expr.Sub(two, two)))
+}
