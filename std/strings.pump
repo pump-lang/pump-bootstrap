@@ -114,7 +114,7 @@ pub fn ends_with(text: string, suffix: string): bool {
     return matches_at(text, suffix, text.length - suffix.length)
 }
 
-// cai nay how many times
+// How many times `needle` occurs without overlapping itself. An empty needle
 // occurs zero times, which keeps the answer finite.
 pub fn count(text: string, needle: string): int {
     if needle.length == 0 || needle.length > text.length {
