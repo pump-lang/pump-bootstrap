@@ -23,3 +23,21 @@ fn with_block(text: string): int {
     }
     return value
 }
+
+fn main() {
+    // Form one: a default expression.
+    io.println(parse("42") catch 0)
+    io.println(parse("x") catch 0)
+
+    // Form two: bind the error and handle it.
+    io.println(with_binder("42"))
+    io.println(with_binder("nope"))
+
+    // Form three: a block that diverges.
+    io.println(with_block("42"))
+    io.println(with_block("nope"))
+
+    // A `catch` default may itself be an arbitrary expression.
+    let fallback = 7
+    io.println(parse("x") catch fallback * 2)
+}

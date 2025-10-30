@@ -21,3 +21,11 @@ pub fn count(catalogue: Catalogue): int {
 pub fn names(catalogue: Catalogue): [string] {
     return catalogue.order
 }
+
+pub fn lookup(catalogue: Catalogue, name: string): float! {
+    let found = catalogue.entries.get(name)
+    if found == null {
+        fail "no entry named `{name}`"
+    }
+    return found
+}
