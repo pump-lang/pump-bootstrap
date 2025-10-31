@@ -80,3 +80,32 @@ struct Inventory {
         return item.price
     }
 }
+
+fn main() {
+    let inventory = Inventory { items: [] }
+
+    let changes = [
+        Change.Add(Item { name: "bolt", price: 3, quantity: 100 }),
+        Change.Add(Item { name: "nut", price: 2, quantity: 200 }),
+        Change.Restock("bolt", 50),
+        Change.Remove("washer"),
+        Change.Add(Item { name: "washer", price: 1, quantity: 10 }),
+        Change.Remove("nut"),
+    ]
+
+    for change in changes {
+        io.println(inventory.apply(change))
+    }
+
+    io.println("value {inventory.value()}")
+    io.println("bolt costs {inventory.price_of("bolt") catch -1}")
+    io.println("gear costs {inventory.price_of("gear") catch -1}")
+
+    let by_name: [string: int] = {}
+    for item in inventory.items {
+        by_name.insert(item.name, item.total())
+    }
+    for name in by_name.keys() {
+        io.println("{name} -> {by_name[name]}")
+    }
+}

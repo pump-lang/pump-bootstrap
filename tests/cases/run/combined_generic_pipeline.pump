@@ -69,3 +69,40 @@ fn render<T: Describable>(items: [T]): string {
     }
     return out
 }
+
+fn main() {
+    let numbers: Sequence<int> = Sequence { values: [] }
+    for i in 1..=6 {
+        numbers.add(i)
+    }
+    io.println(numbers.length())
+    io.println(numbers.fold(0, fn(total: int, value: int): int {
+        return total + value
+    }))
+
+    let even = numbers.keep(fn(value: int): bool {
+        return value % 2 == 0
+    })
+    io.println(even.length())
+    io.println(even.fold(1, fn(product: int, value: int): int {
+        return product * value
+    }))
+
+    io.println(even.at(0).or(-1))
+    io.println(even.at(9).or(-1))
+
+    let readings: Sequence<Reading> = Sequence { values: [] }
+    readings.add(Reading { sensor: "a", celsius: 21 })
+    readings.add(Reading { sensor: "b", celsius: -4 })
+    readings.add(Reading { sensor: "c", celsius: 30 })
+
+    io.println(render(readings.values))
+
+    let warm = readings.keep(fn(reading: Reading): bool {
+        return reading.celsius > 0
+    })
+    io.println(render(warm.values))
+    io.println(warm.fold(0, fn(total: int, reading: Reading): int {
+        return total + reading.celsius
+    }))
+}
