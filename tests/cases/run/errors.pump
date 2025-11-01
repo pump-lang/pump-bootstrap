@@ -34,3 +34,10 @@ fn checked_sum(values: [int]): int! {
     }
     return total
 }
+
+fn main() {
+    io.println(add_digits("one", "two") catch -1)
+    io.println(add_digits("one", "ten") catch -1)
+    io.println(checked_sum([1, 2, 3]) catch -1)
+    io.println(checked_sum([1, -2]) catch -1)
+}

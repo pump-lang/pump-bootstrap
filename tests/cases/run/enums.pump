@@ -28,3 +28,22 @@ fn area(shape: Shape): float {
         Shape.Empty => return 0.0
     }
 }
+
+fn main() {
+    io.println(name_of(Color.Red))
+    io.println(name_of(Color.Blue))
+
+    let colors = [Color.Red, Color.Green, Color.Blue]
+    for color in colors {
+        io.print(name_of(color) + " ")
+    }
+    io.println("")
+
+    io.println(area(Shape.Circle(2.0)))
+    io.println(area(Shape.Rect(3.0, 4.0)))
+    io.println(area(Shape.Empty))
+
+    // Enum values compare by variant and payload.
+    io.println(Color.Red == Color.Red)
+    io.println(Color.Red == Color.Green)
+}
