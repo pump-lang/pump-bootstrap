@@ -47,3 +47,47 @@ enum Outcome<T, E> {
     Ok(T)
     Err(E)
 }
+
+fn unwrap_or<T, E>(outcome: Outcome<T, E>, fallback: T): T {
+    match outcome {
+        Outcome.Ok(value) => return value
+        Outcome.Err(_) => return fallback
+    }
+}
+
+fn main() {
+    io.println(first([1, 2, 3]).or(-1))
+    io.println(first(["a", "b"]).or("-"))
+
+    // An empty literal carries no element type, so the argument is either
+    // annotated or the call is written with a turbofish.
+    let empty: [int] = []
+    io.println(first(empty).or(-1))
+    io.println(first::<int>([]).or(-2))
+
+    let swapped = swap((1, "one"))
+    io.println("{swapped.0}/{swapped.1}")
+
+    io.println(count_matching([1, 2, 2, 3], 2))
+    io.println(count_matching(["a", "b"], "z"))
+
+    let boxed = Box { value: 5 }
+    io.println(boxed.get())
+    io.println(boxed.replace(9))
+    io.println(boxed.get())
+
+    let text_box: Box<string> = Box { value: "hi" }
+    io.println(text_box.get())
+
+    let pair = Pair { left: 1, right: "one" }
+    io.println("{pair.left}={pair.right}")
+
+    let good: Outcome<int, string> = Outcome.Ok(3)
+    let bad: Outcome<int, string> = Outcome.Err("boom")
+    io.println(unwrap_or(good, 0))
+    io.println(unwrap_or(bad, 0))
+
+    // A generic struct nested inside another.
+    let nested = Box { value: Box { value: 1 } }
+    io.println(nested.get().get())
+}

@@ -27,3 +27,11 @@ fn recurse(n: int): int {
     }
     return n * recurse(n - 1)
 }
+
+fn main() {
+    io.println(add(2, 3))
+    hello("Minh")
+    io.println(max(4, 9))
+    nothing()
+    io.println(recurse(5))
+}
