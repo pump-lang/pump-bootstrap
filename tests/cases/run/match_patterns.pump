@@ -48,3 +48,31 @@ fn describe(pair: (int, string)): string {
         (n, text) => return "{n}:{text}"
     }
 }
+
+fn handle(event: Event): string {
+    match event {
+        Event.Click(Point { x, .. }) => return "click at x={x}"
+        Event.Key('q') | Event.Key('Q') => return "quit key"
+        Event.Key(letter) => return "key {letter}"
+        Event.Quit => return "quit"
+    }
+}
+
+fn main() {
+    io.println(quadrant(Point { x: 0, y: 0 }))
+    io.println(quadrant(Point { x: 0, y: 4 }))
+    io.println(quadrant(Point { x: 4, y: 0 }))
+    io.println(quadrant(Point { x: 2, y: 3 }))
+
+    let tree = Tree.Node(Tree.Leaf(1), Tree.Node(Tree.Leaf(2), Tree.Leaf(3)))
+    io.println(depth(tree))
+
+    io.println(describe((0, "a")))
+    io.println(describe((7, "stop")))
+    io.println(describe((7, "go")))
+
+    io.println(handle(Event.Click(Point { x: 9, y: 1 })))
+    io.println(handle(Event.Key('Q')))
+    io.println(handle(Event.Key('z')))
+    io.println(handle(Event.Quit))
+}

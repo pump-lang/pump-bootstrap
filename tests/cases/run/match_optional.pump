@@ -41,3 +41,11 @@ fn tally(values: [int?]): int {
     }
     return total
 }
+
+fn main() {
+    io.println(greet(1))
+    io.println(greet(2))
+    io.println(band(1))
+    io.println(band(2))
+    io.println(tally([1, null, 2, null, 3]))
+}

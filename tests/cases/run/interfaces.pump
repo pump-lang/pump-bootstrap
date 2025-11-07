@@ -50,3 +50,25 @@ fn total_size(items: [Sized]): int {
     }
     return total
 }
+
+fn describe<T: Named>(item: T): string {
+    return "<{item.label()}>"
+}
+
+fn main() {
+    let file = File { path: "/tmp/a", bytes: 120 }
+    let folder = Folder { name: "docs", children: ["a", "b"] }
+
+    announce(file)
+    announce(folder)
+
+    // Structural conformance: no `implements` needed for `Sized`.
+    let sized: [Sized] = [file, folder]
+    io.println(total_size(sized))
+
+    io.println(describe(file))
+    io.println(describe(folder))
+
+    // The builtin `Stringable` interface backs interpolation.
+    io.println("{file.label()} of {file.size()}")
+}
