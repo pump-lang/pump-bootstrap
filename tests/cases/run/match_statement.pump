@@ -31,3 +31,45 @@ fn vowel(letter: char): bool {
         _ => return false
     }
 }
+
+fn word(text: string): int {
+    match text {
+        "one" => return 1
+        "two" => return 2
+        _ => return 0
+    }
+}
+
+fn main() {
+    io.println(classify(0))
+    io.println(classify(1))
+    io.println(classify(7))
+
+    io.println(sign(-3))
+    io.println(sign(0))
+    io.println(sign(9))
+
+    io.println(bucket(4))
+    io.println(bucket(40))
+    io.println(bucket(400))
+
+    io.println(vowel('e'))
+    io.println(vowel('z'))
+
+    io.println(word("two"))
+    io.println(word("ten"))
+
+    // A block arm, and a bare identifier binding as the catch-all.
+    let n = 5
+    match n {
+        5 => {
+            io.println("five")
+        }
+        rest => {
+            io.println("got {rest}")
+        }
+    }
+
+    // Arms may also be separated by commas.
+    match true { true => io.println("yes"), false => io.println("no") }
+}

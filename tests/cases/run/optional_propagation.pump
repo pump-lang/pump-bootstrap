@@ -46,3 +46,7 @@ fn main() {
     // `x?.field` reads as optional chaining and behaves as propagation.
     io.println(chained("an").or("none"))
 }
+
+fn chained(name: string): string? {
+    return find(name)?.manager?.name
+}
