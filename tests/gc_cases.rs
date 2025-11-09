@@ -61,3 +61,49 @@ fn run_case(name: &str) -> String {
     );
     normalise(&String::from_utf8_lossy(&output.stdout))
 }
+
+fn check_case(name: &str) {
+    let actual = run_case(name);
+    let expected = normalise(&read(&gc_dir().join(format!("{name}.out"))));
+    if actual == expected {
+        return;
+    }
+
+    let expected_lines: Vec<&str> = expected.lines().collect();
+    let actual_lines: Vec<&str> = actual.lines().collect();
+    let mut rows = Vec::new();
+    for index in 0..expected_lines.len().max(actual_lines.len()) {
+        let want = expected_lines.get(index).copied().unwrap_or("<none>");
+        let got = actual_lines.get(index).copied().unwrap_or("<none>");
+        let marker = if want == got { ' ' } else { '!' };
+        rows.push(format!(
+            "{marker} {:>3} | expected {want:<24} | actual {got}",
+            index + 1
+        ));
+    }
+    panic!(
+        "gc case `{name}` produced the wrong answer, which means the collector \
+         freed or corrupted something live:\n{}",
+        rows.join("\n")
+    );
+}
+
+#[test]
+fn allocation_pressure() {
+    check_case("allocation_pressure");
+}
+
+#[test]
+fn reference_cycles() {
+    check_case("reference_cycles");
+}
+
+#[test]
+fn liveness() {
+    check_case("liveness");
+}
+
+#[test]
+fn deep_recursion() {
+    check_case("deep_recursion");
+}

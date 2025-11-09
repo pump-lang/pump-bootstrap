@@ -26,7 +26,7 @@
 //   ------------|----------|----------|---------------|-----------
 //   1 000       | 0.05     | 1.00     | 0.01 ms       | 11 ns
 //   10 000      | 0.46     | 1.00     | 0.11 ms       | 11 ns
-//   100 000      | 2.29     | 3.00     | 0.68 ms       | 14 ns
+//   50 000      | 2.29     | 3.00     | 0.68 ms       | 14 ns
 //   200 000     | 9.16     | 10.00    | 3.49 ms       | 17 ns
 //
 // Tuyen tinh theo phan con song, khoang 11 ns mot object khi heap con vua
@@ -111,3 +111,164 @@ fn spread(samples: &mut [Duration]) -> (Duration, Duration, Duration) {
 }
 
 // ===== thoi gian dung =====
+
+#[test]
+fn pause_time_scales_with_the_live_set() {
+    with_runtime(|| {
+        const SIZES: [u64; 4] = [1_000, 10_000, 50_000, 200_000];
+        const TRIALS: usize = 9;
+
+        let mut report = String::from(
+            "\ncollection pause, by live set\n\
+             \n  live objects   live MiB   heap MiB   min ms   median ms   max ms   ns/object\n",
+        );
+
+        for size in SIZES {
+            let mut roots = Roots::new(1);
+            roots.set(0, chain(size));
+            // A realistic heap has garbage in it as well; the sweep walks that
+            // whether it is live or not.
+            churn(size as usize * 2);
+            clobber_stack();
+
+            pump_gc_collect();
+            let live_bytes = heap_bytes_in_use();
+            let heap = heap_bytes_reserved();
+
+            let mut samples = Vec::with_capacity(TRIALS);
+            for _ in 0..TRIALS {
+                let started = Instant::now();
+                pump_gc_collect();
+                samples.push(started.elapsed());
+            }
+            let (low, median, high) = spread(&mut samples);
+
+            writeln!(
+                report,
+                "  {size:>12}   {:>8.2}   {:>8.2}   {:>6.2}   {:>9.2}   {:>6.2}   {:>9.0}",
+                mib(live_bytes),
+                mib(heap),
+                millis(low),
+                millis(median),
+                millis(high),
+                median.as_nanos() as f64 / size as f64,
+            )
+            .expect("writing to a String cannot fail");
+
+            // A pause must be a pause, not a stall.
+            assert!(
+                high < Duration::from_millis(500),
+                "a collection over {size} live objects took {:.1} ms",
+                millis(high)
+            );
+
+            roots.clear();
+            clobber_stack();
+            pump_gc_collect();
+        }
+
+        println!("{report}");
+    });
+}
+
+// ===== heap phinh ra =====
+
+#[test]
+fn the_heap_stops_growing_over_a_long_run() {
+    with_runtime(|| {
+        const LIVE: u64 = 10_000;
+        const ROUNDS: usize = 200;
+        const PER_ROUND: usize = 20_000;
+
+        let mut roots = Roots::new(1);
+        roots.set(0, chain(LIVE));
+        clobber_stack();
+
+        let mut samples = Vec::with_capacity(ROUNDS);
+        let started = Instant::now();
+        for _ in 0..ROUNDS {
+            churn(PER_ROUND);
+            samples.push((heap_bytes_reserved(), heap_bytes_in_use()));
+        }
+        let elapsed = started.elapsed();
+
+        let first = samples[0].0;
+        let last = samples[ROUNDS - 1].0;
+        let peak = samples.iter().map(|sample| sample.0).max().unwrap_or(0);
+        let settled = samples[ROUNDS / 2].0;
+        let allocated = ROUNDS * PER_ROUND;
+        let collections = collection_count();
+
+        // What share of ...
+        // the allocator to time the collections it triggers, so the pause is
+        // measured here, against the heap the run just left behind, and
+        // multiplied by how many the run performed.
+        let mut pauses = Vec::with_capacity(5);
+        for _ in 0..5 {
+            let started = Instant::now();
+            pump_gc_collect();
+            pauses.push(started.elapsed());
+        }
+        let (_, pause, _) = spread(&mut pauses);
+        let collecting = pause.mul_f64(collections as f64);
+
+        println!(
+            "\nheap over a long run\n\n\
+             \x20 rounds                     {ROUNDS}\n\
+             \x20 objects allocated          {allocated}\n\
+             \x20 live set                   {LIVE} objects, {:.2} MiB\n\
+             \x20 collections                {collections}\n\
+             \x20 reserved after round 1     {:.2} MiB\n\
+             \x20 reserved at the halfway    {:.2} MiB\n\
+             \x20 reserved at the end        {:.2} MiB\n\
+             \x20 peak reserved              {:.2} MiB\n\
+             \x20 wall time                  {:.0} ms\n\
+             \x20 allocation rate            {:.1} M objects/s\n\
+             \x20 median pause               {:.2} ms\n\
+             \x20 estimated time collecting  {:.0} ms, {:.1}% of the run\n",
+            mib(samples[ROUNDS - 1].1),
+            mib(first),
+            mib(settled),
+            mib(last),
+            mib(peak),
+            millis(elapsed),
+            allocated as f64 / elapsed.as_secs_f64() / 1e6,
+            millis(pause),
+            millis(collecting),
+            100.0 * collecting.as_secs_f64() / elapsed.as_secs_f64(),
+        );
+
+        assert!(collections > 20, "the run never collected");
+        assert_eq!(
+            last, settled,
+            "the heap was still growing in the second half of the run"
+        );
+        assert!(
+            peak <= settled,
+            "the heap peaked at {peak} bytes and settled at {settled}"
+        );
+    });
+}
+
+// ===== giu nham =====
+
+struct Retention {
+    shape: &'static str,
+    built: usize,
+    retained: usize,
+    bytes: usize,
+}
+
+#[inline(never)]
+fn unlinked_garbage(count: usize) {
+    for index in 0..count {
+        std::hint::black_box(node(index as u64));
+    }
+}
+
+#[inline(never)]
+fn chained_garbage(count: usize, length: u64) {
+    for _ in 0..count / length as usize {
+        std::hint::black_box(chain(length));
+    }
+}
