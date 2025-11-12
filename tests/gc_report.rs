@@ -199,7 +199,7 @@ fn the_heap_stops_growing_over_a_long_run() {
         let allocated = ROUNDS * PER_ROUND;
         let collections = collection_count();
 
-        // What share of ...
+        // What share of the run was spent collecting. There is no hook inside
         // the allocator to time the collections it triggers, so the pause is
         // measured here, against the heap the run just left behind, and
         // multiplied by how many the run performed.
