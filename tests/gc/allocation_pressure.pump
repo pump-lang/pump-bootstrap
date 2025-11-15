@@ -20,3 +20,13 @@ struct Anchor {
 
 // Allocates and immediately abandons `count` nodes, returning a checksum that
 // depends on every one of them.
+fn churn(count: int): int {
+    let checksum = 0
+    let index = 0
+    while index < count {
+        let node = Node { value: index, next: null }
+        checksum += node.value % 7
+        index += 1
+    }
+    return checksum
+}

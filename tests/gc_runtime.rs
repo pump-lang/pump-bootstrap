@@ -85,3 +85,145 @@ fn a_rooted_chain_survives_every_collection() {
         );
     });
 }
+
+#[test]
+fn a_survivors_storage_is_never_handed_out_again() {
+    with_runtime(|| {
+        const COUNT: usize = 4_000;
+        let mut roots = Roots::new(COUNT);
+        for index in 0..COUNT {
+            roots.set(index, node(index as u64));
+        }
+        clobber_stack();
+
+        for round in 0..6 {
+            pump_gc_collect();
+            churn(50_000);
+            for index in 0..COUNT {
+                assert_intact(
+                    roots.get(index),
+                    index as u64,
+                    &format!("after round {round}"),
+                );
+            }
+        }
+    });
+}
+
+// ===== vong tron =====
+
+#[inline(never)]
+fn bu_cycles(count: usize, length: u64) {
+    for _ in 0..count {
+        let head = ring(length);
+        let self_loop = node(0);
+        set_slot(self_loop, NEXT, self_loop);
+        set_slot(self_loop, CHILD, head);
+        std::hint::black_box(self_loop);
+    }
+}
+
+#[test]
+fn unreachable_cycles_are_reclaimed() {
+    with_runtime(|| {
+        const RINGS: usize = 30;
+        const LENGTH: u64 = 200;
+        const BUILT: usize = RINGS * (LENGTH as usize + 1);
+
+        pump_gc_collect();
+        let before = heap_object_count();
+
+        bu_cycles(RINGS, LENGTH);
+        assert!(
+            heap_object_count() >= before + BUILT,
+            "the rings were not built"
+        );
+
+        clobber_stack();
+        pump_gc_collect();
+
+        // vong thi lien thong manh, nen chi mot tu cu tren stack tinh co
+        // giong dia chi mot node la giu lai ca 201 object cua no. Chan o day
+        // cho phep mot ...
+        // tests/gc_report.rs bao.
+        let retained = heap_object_count() - before;
+        assert!(
+            retained <= 2 * (LENGTH as usize + 1),
+            "{retained} of {BUILT} cycle nodes were still live after a \
+             collection, which is more than a stale stack word or two explains"
+        );
+    });
+}
+
+#[test]
+fn a_reachable_cycle_survives_intact() {
+    with_runtime(|| {
+        const LENGTH: u64 = 500;
+        let mut roots = Roots::new(1);
+        roots.set(0, ring(LENGTH));
+        clobber_stack();
+
+        for round in 0..6 {
+            churn(30_000);
+            pump_gc_collect();
+
+            let head = roots.get(0);
+            let mut cursor = head;
+            for index in 0..LENGTH {
+                assert_intact(cursor, index, &format!("after round {round}"));
+                cursor = slot(cursor, NEXT);
+            }
+            assert_eq!(cursor, head, "round {round}: the ring came unclosed");
+        }
+    });
+}
+
+// ===== ep cap phat =====
+
+#[test]
+fn allocation_pressure_collects_rather_than_growing() {
+    with_runtime(|| {
+        // Thirty-two times the collection threshold, all of it garbage.
+        let objects = MIN_HEAP_BYTES / 32 * 32;
+        churn(objects);
+        clobber_stack();
+
+        assert!(
+            collection_count() > 0,
+            "allocating {objects} objects never triggered a collection"
+        );
+        let reserved = heap_bytes_reserved();
+        assert!(
+            reserved <= MIN_HEAP_BYTES * 4,
+            "the heap grew to {reserved} bytes to hold nothing but garbage"
+        );
+    });
+}
+
+#[test]
+fn a_long_run_with_a_steady_live_set_stops_growing() {
+    with_runtime(|| {
+        const LENGTH: u64 = 5_000;
+        let mut roots = Roots::new(1);
+        roots.set(0, chain(LENGTH));
+        clobber_stack();
+
+        // Two warm-up rounds, so the measurement starts from a settled heap.
+        for _ in 0..2 {
+            churn(40_000);
+            pump_gc_collect();
+        }
+        let settled = heap_bytes_reserved();
+
+        for round in 0..40 {
+            churn(40_000);
+            pump_gc_collect();
+            assert_eq!(
+                heap_bytes_reserved(),
+                settled,
+                "round {round} grew the heap past its settled size"
+            );
+        }
+        verify_chain(roots.get(0), LENGTH, "after forty rounds");
+    });
+}
