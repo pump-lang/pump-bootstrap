@@ -32,3 +32,61 @@ fn churn(count: int) {
 
 // Descends to `DEPTH`, churns there, and checks every frame on the way out.
 // Returns the sum of the depths of the frames that came back intact.
+fn descend(depth: int, parent: Frame?): int {
+    let frame = Frame {
+        depth: depth
+        tag: "frame {depth}"
+        values: [depth, depth * 2, depth * 3]
+        parent: parent
+    }
+
+    if depth == DEPTH {
+        churn(200000)
+        // The chain back to the root must still be walkable from down here.
+        let walked = 0
+        let cursor: Frame? = frame
+        while cursor != null {
+            let node = cursor.expect("the loop condition just checked this")
+            walked += 1
+            cursor = node.parent
+        }
+        io.println(walked)
+        return depth
+    }
+
+    let below = descend(depth + 1, frame)
+
+    // The object this frame allocated before the recursive call survived every
+    // collection that happened underneath it.
+    if frame.tag != "frame {depth}" {
+        return -1
+    }
+    if frame.values.length != 3 {
+        return -1
+    }
+    if frame.values[0] != depth {
+        return -1
+    }
+    if frame.values[2] != depth * 3 {
+        return -1
+    }
+    if below < 0 {
+        return -1
+    }
+    return below + depth
+}
+
+// Two functions calling each other, so the scan meets alternating frame
+// layouts rather than one repeated shape.
+fn ping(depth: int, carried: Frame): int {
+    if depth == 0 {
+        churn(20000)
+        return carried.depth
+    }
+    let mine = Frame { depth: depth, tag: "ping", values: [depth], parent: carried }
+    let result = pong(depth - 1, mine)
+    if mine.values[0] != depth {
+        return -1
+    }
+    return result
+}

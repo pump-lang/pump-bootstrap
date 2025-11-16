@@ -7,3 +7,16 @@
 // at it, so the check here reads every element back rather than only the
 // lengths.
 import io
+
+struct Item {
+    id: int
+    name: string
+}
+
+fn churn(count: int) {
+    let index = 0
+    while index < count {
+        let _waste = Item { id: index, name: "waste" }
+        index += 1
+    }
+}

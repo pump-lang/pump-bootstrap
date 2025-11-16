@@ -16,3 +16,20 @@ struct Counter {
 struct Bundle {
     values: [int]
 }
+
+fn make_adder(step: int): fn(int): int {
+    return fn(value: int): int {
+        return value + step
+    }
+}
+
+// The captured struct is reachable only through the closure that was returned.
+fn make_recorder(label: string): fn(int): string {
+    let counter = Counter { label: label, count: 0 }
+    return fn(amount: int): string {
+        counter.count += amount
+        return "{counter.label}={counter.count}"
+    }
+}
+
+// A closure capturing a closure capturing a struct.
