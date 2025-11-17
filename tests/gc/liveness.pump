@@ -13,3 +13,22 @@ struct Record {
     scores: [int]
     next: Record?
 }
+
+fn make_record(id: int): Record {
+    let scores: [int] = []
+    for step in 0..8 {
+        scores.push(id * 8 + step)
+    }
+    return Record { id: id, name: "record {id}", scores: scores, next: null }
+}
+
+// Allocates and abandons enough to force several collections.
+fn churn(count: int) {
+    let index = 0
+    while index < count {
+        let _waste = Record { id: index, name: "waste", scores: [], next: null }
+        index += 1
+    }
+}
+
+// Every field of every record still matches what `make_record` built.

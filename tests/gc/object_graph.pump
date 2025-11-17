@@ -35,3 +35,57 @@ struct Box<T> {
 interface Described {
     fn describe(): string
 }
+
+struct Leaf {
+    id: int
+
+    fn describe(): string {
+        return "leaf {id}"
+    }
+}
+
+struct Branch {
+    count: int
+
+    fn describe(): string {
+        return "branch {count}"
+    }
+}
+
+implements Leaf: Described
+implements Branch: Described
+
+// Builds a complete binary tree of `depth` levels, with parent back-pointers,
+// so the graph is full of cycles and every node is shared between two paths.
+fn build(id: int, depth: int, shared: Tag): TreeNode {
+    let payload: Payload = Payload.Empty
+    if id % 4 == 1 {
+        payload = Payload.Number(id)
+    } else if id % 4 == 2 {
+        payload = Payload.Pair(id, id * 2)
+    } else if id % 4 == 3 {
+        payload = Payload.Labelled(shared)
+    }
+
+    let node = TreeNode {
+        id: id
+        payload: payload
+        tags: [shared, Tag { text: "tag {id}" }]
+        left: null
+        right: null
+        parent: null
+    }
+
+    if depth > 1 {
+        let left = build(id * 2, depth - 1, shared)
+        let right = build(id * 2 + 1, depth - 1, shared)
+        left.parent = node
+        right.parent = node
+        node.left = left
+        node.right = right
+    }
+    return node
+}
+
+// Sums a value derived from every node's payload, so a variant whose pointer
+// map is wrong changes the total.
