@@ -75,3 +75,132 @@ pub fn missing_runtime_library_message() -> String {
 }
 
 // ===== ca phai chay duoc =====
+
+/// Compiles and runs `tests/cases/run/NAME.pump`, asserting its stdout
+/// matches `tests/cases/run/NAME.out` exactly.
+pub fn check_run_case(name: &str) {
+    let directory = cases_dir("run");
+    let program = directory.join(format!("{name}.pump"));
+    let expected = read(&directory.join(format!("{name}.out")));
+
+    let output = invoke(&["run", &program.display().to_string()]);
+    if !output.status.success() {
+        panic!(
+            "{}",
+            failure_report(
+                name,
+                &program,
+                "the program was expected to compile and run, but `pump run` failed",
+                &output,
+            )
+        );
+    }
+
+    let actual = normalise(&String::from_utf8_lossy(&output.stdout));
+    let expected = normalise(&expected);
+    if actual != expected {
+        panic!(
+            "{}",
+            diff_report(name, &program, &expected, &actual, &output)
+        );
+    }
+}
+
+/// Compiles and runs `tests/cases/project/NAME/main.pump`, a multi-file case,
+/// against `tests/cases/project/NAME/expected.out`.
+pub fn check_project_case(name: &str) {
+    let directory = cases_dir("project").join(name);
+    let program = directory.join("main.pump");
+    let expected = read(&directory.join("expected.out"));
+
+    let output = invoke(&["run", &program.display().to_string()]);
+    if !output.status.success() {
+        panic!(
+            "{}",
+            failure_report(
+                name,
+                &program,
+                "the project was expected to compile and run, but `pump run` failed",
+                &output,
+            )
+        );
+    }
+
+    let actual = normalise(&String::from_utf8_lossy(&output.stdout));
+    let expected = normalise(&expected);
+    if actual != expected {
+        panic!(
+            "{}",
+            diff_report(name, &program, &expected, &actual, &output)
+        );
+    }
+}
+
+// ===== ca cham vao he dieu hanh =====
+
+/// Compiles and runs `tests/cases/os/NAME.pump` the way `check_run_case`
+/// does, but hands the program two arguments: a scratch directory of its own,
+/// and the path of the `pump` binary itself.
+///
+/// Ca o day phai doc ghi file va chay tien trinh con, ma ca hai deu khong the
+/// viet cung mot duong dan trong nguon: cai thu muc kia phai la cua rieng lan
+/// chay nay. Dua qua argv la cach duy nhat chuong trinh Pump biet no o dau,
+/// va tien the thu luon `os.args()`. Con tien trinh con thi chinh la `pump`,
+/// nen bo test khong phu thuoc chuong trinh nao co san tren may.
+pub fn check_os_case(name: &str) {
+    let directory = cases_dir("os");
+    let program = directory.join(format!("{name}.pump"));
+    let expected = read(&directory.join(format!("{name}.out")));
+
+    let scratch = scratch_dir(name);
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch)
+        .unwrap_or_else(|error| panic!("cannot make `{}`: {error}", scratch.display()));
+
+    let output = invoke(&[
+        "run",
+        &program.display().to_string(),
+        "--",
+        &scratch.display().to_string(),
+        &compiler().display().to_string(),
+    ]);
+    let _ = std::fs::remove_dir_all(&scratch);
+
+    if !output.status.success() {
+        panic!(
+            "{}",
+            failure_report(
+                name,
+                &program,
+                "the program was expected to compile and run, but `pump run` failed",
+                &output,
+            )
+        );
+    }
+
+    let actual = normalise(&String::from_utf8_lossy(&output.stdout));
+    let expected = normalise(&expected);
+    if actual != expected {
+        panic!(
+            "{}",
+            diff_report(name, &program, &expected, &actual, &output)
+        );
+    }
+}
+
+/// A directory of this case's own, outside the source tree.
+fn scratch_dir(name: &str) -> PathBuf {
+    let mut path = std::env::temp_dir();
+    path.push(format!("pump-os-case-{name}-{}", std::process::id()));
+    path
+}
+
+// ===== ca phai bi tu choi =====
+
+/// What a `.err` file asks of the compiler.
+#[derive(Debug, Default)]
+pub struct Expectation {
+    pub codes: Vec<String>,
+    pub texts: Vec<String>,
+    pub absent: Vec<String>,
+}
