@@ -19,3 +19,10 @@ struct Row {
 
 // Builds one line by repeated concatenation, so every partial result is an
 // object that becomes garbage the moment the next one exists.
+fn render(index: int): string {
+    let text = ""
+    for part in 0..8 {
+        text = text + "{index}:{part};"
+    }
+    return text
+}

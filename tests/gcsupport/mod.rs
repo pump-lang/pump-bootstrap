@@ -89,3 +89,85 @@ fn build_type_table() -> usize {
 }
 
 // ===== di vao runtime =====
+
+static RUNTIME_LOCK: Mutex<()> = Mutex::new(());
+
+/// Runs `body` with the process runtime to itself: an empty heap, the
+/// synthetic type table installed, and a stack bottom above every frame
+/// `body` will occupy.
+#[inline(never)]
+pub fn with_runtime(body: impl FnOnce()) {
+    let _lock = RUNTIME_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    // This local is the far end of the conservatively scanned range. `body`
+    // runs in a deeper frame, so everything it holds lies inside that range.
+    let mut bottom = 0usize;
+    let table = *TYPE_TABLE.get_or_init(build_type_table);
+    pump_rt_init(
+        &mut bottom as *mut usize as *const u8,
+        table as *const TypeDescriptor,
+        TYPE_COUNT as u64,
+        ptr::null_mut(),
+        0,
+        0,
+        ptr::null(),
+    );
+
+    let outcome = run_body(body);
+    release_all_roots();
+    pump_rt_shutdown(0);
+
+    if let Err(payload) = outcome {
+        std::panic::resume_unwind(payload);
+    }
+}
+
+#[inline(never)]
+fn run_body(body: impl FnOnce()) -> std::thread::Result<()> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(body))
+}
+
+// ===== object =====
+
+/// Allocates a `Node` carrying `index` in both its scalar words.
+pub fn node(index: u64) -> *mut u8 {
+    let object = pump_alloc(NODE, NODE_SIZE);
+    set_word(object, VALUE, index);
+    set_word(object, MAGIC, magic(index));
+    object
+}
+
+/// Allocates a `Node` of `size` bytes rather than the usual `NODE_SIZE`.
+pub fn node_of_size(index: u64, size: u64) -> *mut u8 {
+    assert!(size >= NODE_SIZE);
+    let object = pump_alloc(NODE, size);
+    set_word(object, VALUE, index);
+    set_word(object, MAGIC, magic(index));
+    object
+}
+
+/// Allocates a `Leaf`, the shape used for pure garbage.
+pub fn leaf(index: u64) -> *mut u8 {
+    let object = pump_alloc(LEAF, LEAF_SIZE);
+    set_word(object, 16, index);
+    object
+}
+
+/// Reads the word at `object + offset`.
+pub fn word(object: *const u8, offset: usize) -> u64 {
+    // SAFETY: the caller passes a live object and an offset inside it.
+    unsafe { (object.add(offset) as *const u64).read() }
+}
+
+/// Writes the word at `object + offset`.
+pub fn set_word(object: *mut u8, offset: usize, value: u64) {
+    // SAFETY: the caller passes a live object and an offset inside it.
+    unsafe { (object.add(offset) as *mut u64).write(value) }
+}
+
+/// Reads the pointer slot at `object + offset`.
+pub fn slot(object: *const u8, offset: usize) -> *mut u8 {
+    word(object, offset) as *mut u8
+}

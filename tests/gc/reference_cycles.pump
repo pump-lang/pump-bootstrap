@@ -24,3 +24,32 @@ struct Pet {
 
 // Builds a closed ring of `length` nodes and returns the sum of its ids,
 // walked the whole way round.
+fn ring_sum(length: int): int {
+    let head = Ring { id: 0, next: null }
+    let tail = head
+    for index in 1..length {
+        let node = Ring { id: index, next: null }
+        tail.next = node
+        tail = node
+    }
+    // Closing the ring is what makes it unreachable-but-self-referential once
+    // `head` goes out of scope.
+    tail.next = head
+
+    let sum = 0
+    let cursor = head
+    for _ in 0..length {
+        sum += cursor.id
+        cursor = cursor.next.expect("the ring is closed")
+    }
+    return sum
+}
+
+// A node whose only reference is to itself.
+fn self_cycle(value: int): int {
+    let node = Ring { id: value, next: null }
+    node.next = node
+    return node.next.expect("just assigned").id
+}
+
+// Two objects that reference each other, both reachable only from the pair.
