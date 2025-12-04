@@ -272,3 +272,145 @@ fn chained_garbage(count: usize, length: u64) {
         std::hint::black_box(chain(length));
     }
 }
+
+#[inline(never)]
+fn ringed_garbage(count: usize, length: u64) {
+    for _ in 0..count / length as usize {
+        let head = chain(length);
+        let mut tail = head;
+        while !slot(tail, NEXT).is_null() {
+            tail = slot(tail, NEXT);
+        }
+        set_slot(tail, NEXT, head);
+        std::hint::black_box(head);
+    }
+}
+
+#[inline(never)]
+fn dead_descent(depth: u64, remaining: u64) -> u64 {
+    let mine = node(depth);
+    set_slot(mine, CHILD, node(depth + 1_000_000));
+    if remaining == 0 {
+        return depth;
+    }
+    let below = dead_descent(depth + 1, remaining - 1);
+    std::hint::black_box(mine);
+    below
+}
+
+fn probe(shape: &'static str, built: usize, build: impl FnOnce()) -> Retention {
+    pump_gc_collect();
+    let baseline = heap_object_count();
+
+    build();
+
+    // Deliberately no `clobber_stack` here. The question is what a collection
+    // running right after the frame that made the garbage returned retains,
+    // which is the moment a real program collects: the allocation that
+    // triggers a cycle is usually the very next one.
+    pump_gc_collect();
+    let retained = heap_object_count().saturating_sub(baseline);
+    let bytes = heap_bytes_in_use();
+
+    // Leave the heap clean for the next probe.
+    clobber_stack();
+    pump_gc_collect();
+
+    Retention {
+        shape,
+        built,
+        retained,
+        bytes,
+    }
+}
+
+#[test]
+fn false_retention_is_bounded_and_shape_dependent() {
+    with_runtime(|| {
+        const COUNT: usize = 20_000;
+        const DESCENT: u64 = 1_000;
+
+        let probes = vec![
+            probe("20000 unlinked objects", COUNT, || unlinked_garbage(COUNT)),
+            probe("200 chains of 100", COUNT, || chained_garbage(COUNT, 100)),
+            probe("20 chains of 1000", COUNT, || chained_garbage(COUNT, 1_000)),
+            probe("100 rings of 200", COUNT, || ringed_garbage(COUNT, 200)),
+            probe("1000-frame dead descent", 2 * DESCENT as usize + 2, || {
+                std::hint::black_box(dead_descent(0, DESCENT));
+            }),
+        ];
+
+        let mut report = String::from(
+            "\nfalse retention: garbage the conservative stack scan kept\n\
+             \n  garbage shape                 built   retained   share   retained KiB\n",
+        );
+        for entry in &probes {
+            writeln!(
+                report,
+                "  {:<28} {:>6}   {:>8}   {:>5.2}%   {:>12.1}",
+                entry.shape,
+                entry.built,
+                entry.retained,
+                100.0 * entry.retained as f64 / entry.built as f64,
+                entry.bytes as f64 / 1024.0,
+            )
+            .expect("writing to a String cannot fail");
+        }
+        println!("{report}");
+
+        for entry in &probes {
+            assert!(
+                entry.retained * 10 <= entry.built,
+                "the `{}` probe kept {} of {} objects; conservative scanning \
+                 costs a few false roots, not a tenth of the heap",
+                entry.shape,
+                entry.retained,
+                entry.built
+            );
+        }
+
+        // Unlinked garbage has no substructure for a false root to drag along,
+        // so retention there is a direct count of stack words that looked like
+        // an address. It should be a handful at most.
+        let unlinked = &probes[0];
+        assert!(
+            unlinked.retained <= 64,
+            "{} stack words looked like object addresses, which is far more \
+             than the scan should be finding",
+            unlinked.retained
+        );
+    });
+}
+
+#[test]
+fn false_retention_does_not_accumulate() {
+    with_runtime(|| {
+        pump_gc_collect();
+        let baseline = heap_object_count();
+
+        let mut samples = Vec::new();
+        for _ in 0..12 {
+            ringed_garbage(20_000, 200);
+            pump_gc_collect();
+            samples.push(heap_object_count().saturating_sub(baseline));
+        }
+
+        println!(
+            "\nfalse retention over twelve rounds of 20000 ring nodes\n\n  survivors per round: {samples:?}\n"
+        );
+
+        // Twelve rounds of the same garbage: if a false root were permanent,
+        // the survivors would climb round on round.
+        let first_half: usize = samples[..6].iter().sum();
+        let second_half: usize = samples[6..].iter().sum();
+        assert!(
+            second_half <= first_half + 2_000,
+            "retention grew from {first_half} to {second_half} across the run, \
+             which is a leak rather than an unlucky stack"
+        );
+        assert!(
+            samples.iter().any(|&survivors| survivors < 1_000),
+            "every round retained the graph: {samples:?}"
+        );
+    });
+}

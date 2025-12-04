@@ -107,3 +107,75 @@ fn liveness() {
 fn deep_recursion() {
     check_case("deep_recursion");
 }
+
+#[test]
+fn collections_under_pressure() {
+    check_case("collections_under_pressure");
+}
+
+#[test]
+fn string_churn() {
+    check_case("string_churn");
+}
+
+#[test]
+fn closure_captures() {
+    check_case("closure_captures");
+}
+
+#[test]
+fn object_graph() {
+    check_case("object_graph");
+}
+
+#[test]
+fn repeated_runs_agree() {
+    let first = run_case("reference_cycles");
+    for attempt in 2..=3 {
+        let again = run_case("reference_cycles");
+        assert_eq!(
+            first, again,
+            "run {attempt} of `reference_cycles` disagreed with run 1"
+        );
+    }
+}
+
+#[test]
+fn every_case_is_registered() {
+    let directory = gc_dir();
+    let mut programs = Vec::new();
+    let mut answers = Vec::new();
+
+    let entries = std::fs::read_dir(&directory)
+        .unwrap_or_else(|error| panic!("cannot read `{}`: {error}", directory.display()));
+    for entry in entries {
+        let path = entry.expect("a readable directory entry").path();
+        let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .expect("a case file name is valid UTF-8")
+            .to_string();
+        match extension {
+            "pump" => programs.push(stem),
+            "out" => answers.push(stem),
+            _ => {}
+        }
+    }
+
+    programs.sort();
+    answers.sort();
+    let mut listed: Vec<String> = CASES.iter().map(|name| (*name).to_string()).collect();
+    listed.sort();
+
+    assert_eq!(
+        programs, listed,
+        "the programs in `tests/gc` are not the cases this suite lists"
+    );
+    assert_eq!(
+        answers, listed,
+        "every program in `tests/gc` needs exactly one `.out` beside it"
+    );
+}
