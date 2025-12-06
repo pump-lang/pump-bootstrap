@@ -113,7 +113,7 @@ fn a_survivors_storage_is_never_handed_out_again() {
 // ===== vong tron =====
 
 #[inline(never)]
-fn bu_cycles(count: usize, length: u64) {
+fn build_cycles(count: usize, length: u64) {
     for _ in 0..count {
         let head = ring(length);
         let self_loop = node(0);
@@ -133,7 +133,7 @@ fn unreachable_cycles_are_reclaimed() {
         pump_gc_collect();
         let before = heap_object_count();
 
-        bu_cycles(RINGS, LENGTH);
+        build_cycles(RINGS, LENGTH);
         assert!(
             heap_object_count() >= before + BUILT,
             "the rings were not built"
@@ -225,5 +225,151 @@ fn a_long_run_with_a_steady_live_set_stops_growing() {
             );
         }
         verify_chain(roots.get(0), LENGTH, "after forty rounds");
+    });
+}
+
+#[test]
+fn large_objects_are_reclaimed_and_their_space_reused() {
+    with_runtime(|| {
+        use pump_runtime::alloc::pump_alloc_buffer;
+
+        pump_gc_collect();
+        let baseline = heap_bytes_reserved();
+
+        for round in 0..40 {
+            for _ in 0..16 {
+                std::hint::black_box(pump_alloc_buffer(64 * 1024));
+            }
+            clobber_stack();
+            pump_gc_collect();
+            assert!(
+                heap_bytes_reserved() <= baseline.max(MIN_HEAP_BYTES) * 4,
+                "round {round}: forty megabytes of dead buffers grew the heap to {} bytes",
+                heap_bytes_reserved()
+            );
+        }
+    });
+}
+
+// ===== quet stack kieu bao thu =====
+
+fn descend(depth: u64, remaining: u64) -> u64 {
+    let mine = node(depth);
+    // A second object, linked from the first, so the scan has to find a root
+    // and the trace has to follow it.
+    set_slot(mine, CHILD, node(depth + 1_000_000));
+
+    if remaining == 0 {
+        churn(60_000);
+        pump_gc_collect();
+        assert_intact(mine, depth, "at the bottom of the descent");
+        return depth;
+    }
+
+    let below = descend(depth + 1, remaining - 1);
+
+    assert_intact(mine, depth, "on the way out of the descent");
+    let child = slot(mine, CHILD);
+    assert_intact(child, depth + 1_000_000, "a child on the way out");
+    below + depth
+}
+
+#[test]
+fn deep_recursion_keeps_every_frames_roots_alive() {
+    with_runtime(|| {
+        const DEPTH: u64 = 1_500;
+        let total = descend(0, DEPTH);
+        assert_eq!(total, DEPTH * (DEPTH + 1) / 2);
+    });
+}
+
+#[test]
+fn a_reference_held_only_in_a_register_survives() {
+    with_runtime(|| {
+        let kept = std::hint::black_box(node(7));
+        for _ in 0..4 {
+            churn(40_000);
+            pump_gc_collect();
+            assert_intact(std::hint::black_box(kept), 7, "a register-held node");
+        }
+    });
+}
+
+#[test]
+fn every_live_object_is_found_by_the_stack_scan() {
+    use gcsupport::node_of_size;
+
+    with_runtime(|| {
+        const COUNT: usize = 1_500;
+        const SIZES: [u64; 8] = [48, 64, 128, 512, 1_024, 2_048, 8_192, 65_536];
+
+        // Fragment the heap first, so what follows comes from a mixture of
+        // split free blocks and fresh bump space rather than one clean run.
+        churn(60_000);
+        clobber_stack();
+        pump_gc_collect();
+
+        // A stack array is the point: the only reference to any of these
+        // objects is a word in this frame, so each one survives only if the
+        // conservative scan recognises its address.
+        let mut held = [std::ptr::null_mut::<u8>(); COUNT];
+        for (index, entry) in held.iter_mut().enumerate() {
+            *entry = node_of_size(index as u64, SIZES[index % SIZES.len()]);
+        }
+
+        pump_gc_collect();
+        for (index, &object) in held.iter().enumerate() {
+            assert_intact(object, index as u64, "held only on the stack");
+        }
+
+        // Drop every other one, collect, and refill the holes. The survivors
+        // must come through a sweep that freed and coalesced around them.
+        for entry in held.iter_mut().step_by(2) {
+            *entry = std::ptr::null_mut();
+        }
+        pump_gc_collect();
+        churn(40_000);
+        for (index, entry) in held.iter_mut().enumerate() {
+            if entry.is_null() {
+                *entry = node_of_size(index as u64, SIZES[index % SIZES.len()]);
+            }
+        }
+
+        pump_gc_collect();
+        for (index, &object) in held.iter().enumerate() {
+            assert_intact(object, index as u64, "after a sweep around it");
+        }
+        std::hint::black_box(&held);
+    });
+}
+
+// ===== tam dung gom =====
+
+#[test]
+fn a_disabled_collector_defers_and_a_re_enabled_one_catches_up() {
+    with_runtime(|| {
+        pump_gc_collect();
+        let collections = collection_count();
+
+        pump_gc_disable();
+        churn(MIN_HEAP_BYTES / 32 * 4);
+        assert_eq!(
+            collection_count(),
+            collections,
+            "a disabled collector ran anyway"
+        );
+        let while_disabled = heap_bytes_in_use();
+
+        pump_gc_enable();
+        clobber_stack();
+        pump_gc_collect();
+
+        assert_eq!(collection_count(), collections + 1);
+        assert!(
+            heap_bytes_in_use() * 8 < while_disabled,
+            "re-enabling the collector reclaimed almost nothing: {} bytes of {}",
+            heap_bytes_in_use(),
+            while_disabled
+        );
     });
 }
