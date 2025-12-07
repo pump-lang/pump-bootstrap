@@ -90,3 +90,24 @@ fn ping(depth: int, carried: Frame): int {
     }
     return result
 }
+
+fn pong(depth: int, carried: Frame): int {
+    if depth == 0 {
+        churn(20000)
+        return carried.depth
+    }
+    let mine = Frame { depth: depth, tag: "pong", values: [depth * 2], parent: carried }
+    let result = ping(depth - 1, mine)
+    if mine.values[0] != depth * 2 {
+        return -1
+    }
+    return result
+}
+
+fn main() {
+    io.println(descend(0, null))
+
+    let root = Frame { depth: 7, tag: "root", values: [7], parent: null }
+    io.println(ping(500, root))
+    io.println(root.values[0])
+}

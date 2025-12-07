@@ -20,3 +20,103 @@ fn churn(count: int) {
         index += 1
     }
 }
+
+fn main() {
+    // A large array of scalars, and one of references.
+    let numbers: [int] = []
+    for index in 0..200000 {
+        numbers.push(index * 3)
+    }
+    let items: [Item] = []
+    for index in 0..40000 {
+        items.push(Item { id: index, name: "item {index}" })
+    }
+
+    // A map with reference keys and reference values.
+    let table: [string: Item] = {}
+    for index in 0..30000 {
+        table.insert("key {index}", items[index])
+    }
+
+    // A map with scalar keys and scalar values.
+    let squares: [int: int] = {}
+    for index in 0..30000 {
+        squares.insert(index, index * index)
+    }
+
+    // A set of strings, and a set of ints.
+    let names: set<string> = {}
+    for index in 0..30000 {
+        names.add("name {index}")
+    }
+    let ids: set<int> = {}
+    for index in 0..30000 {
+        ids.add(index * 2)
+    }
+
+    churn(400000)
+
+    // Growing the collections after a collection has moved the free lists
+    // around exercises the buffers again.
+    for index in 200000..210000 {
+        numbers.push(index * 3)
+    }
+    for index in 30000..32000 {
+        table.insert("key {index}", Item { id: index, name: "item {index}" })
+    }
+
+    churn(400000)
+
+    let array_sum = 0
+    for value in numbers {
+        array_sum += value % 11
+    }
+    io.println(numbers.length)
+    io.println(array_sum)
+
+    let named = 0
+    for index in 0..40000 {
+        if items[index].name == "item {index}" {
+            named += 1
+        }
+    }
+    io.println(named)
+
+    let matched = 0
+    for index in 0..32000 {
+        let found = table.get("key {index}")
+        if found != null && found.id == index {
+            matched += 1
+        }
+    }
+    io.println(table.length)
+    io.println(matched)
+
+    let square_sum = 0
+    for index in 0..30000 {
+        square_sum += squares[index] % 13
+    }
+    io.println(squares.length)
+    io.println(square_sum)
+
+    let present = 0
+    for index in 0..30000 {
+        if names.has("name {index}") {
+            present += 1
+        }
+        if ids.has(index * 2) {
+            present += 1
+        }
+    }
+    io.println(names.length)
+    io.println(ids.length)
+    io.println(present)
+
+    // Removal after collection: the entry buffer stays consistent.
+    for index in 0..1000 {
+        names.remove("name {index}")
+        squares.remove(index)
+    }
+    io.println(names.length)
+    io.println(squares.length)
+}
