@@ -144,7 +144,7 @@ fn unreachable_cycles_are_reclaimed() {
 
         // vong thi lien thong manh, nen chi mot tu cu tren stack tinh co
         // giong dia chi mot node la giu lai ca 201 object cua no. Chan o day
-        // cho phep mot ...
+        // cho phep mot hai cai the, khong hon; con so that thi
         // tests/gc_report.rs bao.
         let retained = heap_object_count() - before;
         assert!(
@@ -371,5 +371,273 @@ fn a_disabled_collector_defers_and_a_re_enabled_one_catches_up() {
             heap_bytes_in_use(),
             while_disabled
         );
+    });
+}
+
+#[test]
+fn suspension_nests() {
+    with_runtime(|| {
+        pump_gc_collect();
+        let collections = collection_count();
+
+        pump_gc_disable();
+        pump_gc_disable();
+        pump_gc_enable();
+        churn(MIN_HEAP_BYTES / 32 * 4);
+        assert_eq!(collection_count(), collections, "one enable was enough");
+
+        pump_gc_enable();
+        churn(MIN_HEAP_BYTES / 32 * 4);
+        assert!(
+            collection_count() > collections,
+            "the second enable did not"
+        );
+    });
+}
+
+// ===== do thi bi sua lien tuc, so voi mot ban mo phong =====
+
+struct Model {
+    addresses: Vec<*mut u8>,
+    edges: Vec<[Option<usize>; 2]>,
+    roots: Roots,
+    root_of: Vec<Option<usize>>,
+}
+
+impl Model {
+    fn new(root_count: usize) -> Model {
+        Model {
+            addresses: Vec::new(),
+            edges: Vec::new(),
+            roots: Roots::new(root_count),
+            root_of: vec![None; root_count],
+        }
+    }
+
+    fn add(&mut self) -> usize {
+        let index = self.addresses.len();
+        self.addresses.push(node(index as u64));
+        self.edges.push([None, None]);
+        index
+    }
+
+    fn grow(&mut self, count: usize) {
+        pump_gc_disable();
+        for _ in 0..count {
+            self.add();
+        }
+        pump_gc_enable();
+    }
+
+    fn link(&mut self, from: usize, field: usize, to: Option<usize>) {
+        let offset = if field == 0 { NEXT } else { CHILD };
+        let target = to.map_or(std::ptr::null_mut(), |index| self.addresses[index]);
+        set_slot(self.addresses[from], offset, target);
+        self.edges[from][field] = to;
+    }
+
+    fn root(&mut self, position: usize, index: Option<usize>) {
+        let target = index.map_or(std::ptr::null_mut(), |index| self.addresses[index]);
+        self.roots.set(position, target);
+        self.root_of[position] = index;
+    }
+
+    fn reachable(&self) -> Vec<usize> {
+        let mut seen = vec![false; self.addresses.len()];
+        let mut pending: Vec<usize> = self.root_of.iter().flatten().copied().collect();
+        let mut found = Vec::new();
+        while let Some(index) = pending.pop() {
+            if std::mem::replace(&mut seen[index], true) {
+                continue;
+            }
+            found.push(index);
+            for target in self.edges[index].iter().flatten() {
+                pending.push(*target);
+            }
+        }
+        found
+    }
+
+    fn verify(&self, reachable: &[usize], context: &str) {
+        for &index in reachable {
+            let object = self.addresses[index];
+            assert_intact(object, index as u64, context);
+            for (field, offset) in [(0usize, NEXT), (1usize, CHILD)] {
+                let expected = self.edges[index][field]
+                    .map_or(std::ptr::null_mut(), |target| self.addresses[target]);
+                let found = slot(object, offset);
+                assert_eq!(
+                    found, expected,
+                    "{context}: node {index} field {field} points at {found:p}, \
+                     and the model says {expected:p}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_mutating_graph_is_traced_exactly() {
+    with_runtime(|| {
+        const ROOTS: usize = 24;
+        const INITIAL: usize = 4_000;
+        const ROUNDS: usize = 30;
+
+        let mut rng = Rng::new(0x5eed_1234);
+        let mut model = Model::new(ROOTS);
+
+        model.grow(INITIAL);
+        for index in 0..INITIAL {
+            let first = rng.below(INITIAL);
+            let second = rng.below(INITIAL);
+            model.link(index, 0, Some(first));
+            model.link(index, 1, Some(second));
+        }
+        for position in 0..ROOTS {
+            let index = rng.below(INITIAL);
+            model.root(position, Some(index));
+        }
+
+        let mut worst_false_retention = 0usize;
+        for round in 0..ROUNDS {
+            let live = model.reachable();
+            assert!(!live.is_empty(), "round {round}: the graph emptied");
+
+            pump_gc_disable();
+            for _ in 0..live.len() / 4 {
+                let from = live[rng.below(live.len())];
+                let field = rng.below(2);
+                match rng.below(8) {
+                    0 => model.link(from, field, None),
+                    1 | 2 => {
+                        let fresh = model.add();
+                        model.link(from, field, Some(fresh));
+                    }
+                    _ => {
+                        let to = live[rng.below(live.len())];
+                        model.link(from, field, Some(to));
+                    }
+                }
+            }
+            // Move a root, which is how a whole subgraph becomes garbage.
+            let position = rng.below(ROOTS);
+            let target = live[rng.below(live.len())];
+            model.root(position, Some(target));
+            pump_gc_enable();
+
+            let live = model.reachable();
+            churn(20_000);
+            clobber_stack();
+            pump_gc_collect();
+            model.verify(&live, &format!("round {round}"));
+
+            let retained = heap_object_count().saturating_sub(live.len());
+            worst_false_retention = worst_false_retention.max(retained);
+        }
+
+        // The number is reported properly by `tests/gc_report.rs`; the bound
+        // here is only wide enough to catch a collector that has stopped
+        // reclaiming rather than one having an unlucky stack.
+        assert!(
+            worst_false_retention < 4_000,
+            "{worst_false_retention} objects survived that the model says are \
+             unreachable, which is more than a conservative scan explains"
+        );
+    });
+}
+
+#[test]
+fn dropping_every_root_reclaims_the_whole_graph() {
+    with_runtime(|| {
+        pump_gc_collect();
+        let baseline = heap_object_count();
+
+        let mut model = Model::new(4);
+        model.grow(3_000);
+        let mut rng = Rng::new(0xfeed_9876);
+        for index in 0..3_000 {
+            model.link(index, 0, Some(rng.below(3_000)));
+            model.link(index, 1, Some(rng.below(3_000)));
+        }
+        for position in 0..4 {
+            model.root(position, Some(rng.below(3_000)));
+        }
+
+        clobber_stack();
+        pump_gc_collect();
+        assert!(
+            heap_object_count() >= baseline + 2_000,
+            "the graph did not survive while it was rooted"
+        );
+
+        for position in 0..4 {
+            model.root(position, None);
+        }
+        // The model's own `addresses` vector lives on the malloc heap, which
+        // the collector never scans, so nothing but a stale stack word can
+        // keep the graph now.
+        clobber_stack();
+        pump_gc_collect();
+
+        let after = heap_object_count().saturating_sub(baseline);
+        assert!(
+            after <= 128,
+            "{after} of 3000 nodes survived after every root was dropped"
+        );
+        drop(model);
+    });
+}
+
+// ===== header co sach khong =====
+
+#[test]
+fn no_mark_bit_survives_the_collection_that_set_it() {
+    with_runtime(|| {
+        const LENGTH: u64 = 2_000;
+        let mut roots = Roots::new(1);
+        roots.set(0, chain(LENGTH));
+
+        for round in 0..4 {
+            pump_gc_collect();
+            let mut cursor = roots.get(0);
+            while !cursor.is_null() {
+                assert_eq!(
+                    gcsupport::flags(cursor) & pump_runtime::FLAG_MARK,
+                    0,
+                    "round {round}: a survivor kept its mark bit"
+                );
+                cursor = slot(cursor, NEXT);
+            }
+            // If a mark bit had survived, the next cycle would free the rest
+            // of the chain behind it.
+            churn(20_000);
+            pump_gc_collect();
+            verify_chain(roots.get(0), LENGTH, &format!("round {round}"));
+        }
+    });
+}
+
+#[test]
+fn a_survivors_payload_is_bit_for_bit_unchanged() {
+    with_runtime(|| {
+        const COUNT: usize = 2_000;
+        let mut roots = Roots::new(COUNT);
+        for index in 0..COUNT {
+            let object = node(index as u64);
+            gcsupport::set_word(object, VALUE, 0xdead_0000_0000_0000 | index as u64);
+            roots.set(index, object);
+        }
+
+        for round in 0..5 {
+            churn(30_000);
+            pump_gc_collect();
+            for index in 0..COUNT {
+                assert_eq!(
+                    word(roots.get(index), VALUE),
+                    0xdead_0000_0000_0000 | index as u64,
+                    "round {round}: node {index} came back with a different payload"
+                );
+            }
+        }
     });
 }

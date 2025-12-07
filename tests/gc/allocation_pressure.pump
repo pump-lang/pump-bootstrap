@@ -30,3 +30,32 @@ fn churn(count: int): int {
     }
     return checksum
 }
+
+fn main() {
+    // A live set that must survive every collection the churn provokes.
+    let anchors: [Anchor] = []
+    for index in 0..16 {
+        anchors.push(Anchor { label: "anchor {index}", total: index * index })
+    }
+
+    io.println(churn(500000))
+
+    // Interleave: more churn between reads of the live set.
+    let seen = 0
+    for round in 0..4 {
+        seen += churn(50000)
+        seen += anchors[round].total
+    }
+    io.println(seen)
+
+    // Every anchor is still exactly what it was.
+    let intact = 0
+    for index in 0..16 {
+        let anchor = anchors[index]
+        if anchor.label == "anchor {index}" && anchor.total == index * index {
+            intact += 1
+        }
+    }
+    io.println(intact)
+    io.println(anchors.length)
+}
