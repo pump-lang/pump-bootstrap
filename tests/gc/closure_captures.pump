@@ -33,3 +33,77 @@ fn make_recorder(label: string): fn(int): string {
 }
 
 // A closure capturing a closure capturing a struct.
+fn make_wrapper(inner: fn(int): int, bundle: Bundle): fn(int): int {
+    return fn(value: int): int {
+        return inner(value) + bundle.values[0]
+    }
+}
+
+fn churn(count: int) {
+    let index = 0
+    while index < count {
+        let _waste = Counter { label: "waste", count: index }
+        index += 1
+    }
+}
+
+fn main() {
+    // Twenty thousand closures built and dropped, five hundred kept.
+    let kept: [fn(int): int] = []
+    for index in 0..20000 {
+        let adder = make_adder(index)
+        if index % 40 == 0 {
+            kept.push(adder)
+        }
+    }
+    io.println(kept.length)
+
+    churn(300000)
+
+    // Every survivor still adds the step it captured.
+    let sum = 0
+    for position in 0..kept.length {
+        sum += kept[position](0)
+    }
+    io.println(sum)
+
+    // A recorder's captured struct is mutable state that has to survive too.
+    let recorder = make_recorder("hits")
+    io.println(recorder(1))
+    churn(300000)
+    io.println(recorder(41))
+    churn(300000)
+    io.println(recorder(0))
+
+    // Nested captures: closure over closure over struct.
+    let wrapped = make_wrapper(make_adder(100), Bundle { values: [7, 8, 9] })
+    churn(300000)
+    io.println(wrapped(1))
+
+    // Closures held in a map, which is a second level of tracing between the
+    // root and the capture.
+    let table: [string: fn(int): int] = {}
+    for index in 0..2000 {
+        table.insert("f{index}", make_adder(index * 2))
+    }
+    churn(300000)
+    let table_sum = 0
+    for index in 0..2000 {
+        table_sum += table["f{index}"](1)
+    }
+    io.println(table.length)
+    io.println(table_sum)
+
+    // A closure capturing a binding the enclosing scope keeps mutating.
+    let running = 0
+    let bump = fn(amount: int) {
+        running += amount
+    }
+    for index in 0..1000 {
+        bump(index)
+        if index % 100 == 0 {
+            churn(2000)
+        }
+    }
+    io.println(running)
+}
