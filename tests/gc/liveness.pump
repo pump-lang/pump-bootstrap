@@ -32,3 +32,58 @@ fn churn(count: int) {
 }
 
 // Every field of every record still matches what `make_record` built.
+fn verify(records: [Record]): int {
+    let intact = 0
+    for record in records {
+        if record.name != "record {record.id}" {
+            continue
+        }
+        if record.scores.length != 8 {
+            continue
+        }
+        let ok = true
+        for step in 0..8 {
+            if record.scores[step] != record.id * 8 + step {
+                ok = false
+            }
+        }
+        if ok {
+            intact += 1
+        }
+    }
+    return intact
+}
+
+fn main() {
+    let records: [Record] = []
+    for id in 0..20000 {
+        records.push(make_record(id))
+    }
+
+    // A chain woven through the same objects: the array is not the only path
+    // to them, and the chain has to stay walkable too.
+    for id in 1..20000 {
+        records[id - 1].next = records[id]
+    }
+
+    io.println(verify(records))
+
+    churn(200000)
+    io.println(verify(records))
+
+    churn(200000)
+    io.println(verify(records))
+
+    // Walk the chain from the head and confirm it still reaches every record.
+    let cursor: Record? = records[0]
+    let walked = 0
+    let sum = 0
+    while cursor != null {
+        let record = cursor.expect("the loop condition just checked this")
+        walked += 1
+        sum += record.id
+        cursor = record.next
+    }
+    io.println(walked)
+    io.println(sum)
+}
