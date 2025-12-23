@@ -53,3 +53,43 @@ fn self_cycle(value: int): int {
 }
 
 // Two objects that reference each other, both reachable only from the pair.
+fn mutual_cycle(index: int): int {
+    let owner = Owner { name: "owner {index}", pet: null }
+    let pet = Pet { name: "pet {index}", owner: owner }
+    owner.pet = pet
+    return owner.pet.expect("just assigned").name.length
+}
+
+fn main() {
+    // Four thousand rings of sixty nodes: two hundred forty thousand nodes,
+    // every one of them part of a cycle, every one of them dropped.
+    let rings = 0
+    for _ in 0..4000 {
+        rings += ring_sum(60)
+    }
+    io.println(rings)
+
+    let selves = 0
+    for index in 0..200000 {
+        selves += self_cycle(index) % 3
+    }
+    io.println(selves)
+
+    let mutuals = 0
+    for index in 0..100000 {
+        mutuals += mutual_cycle(index)
+    }
+    io.println(mutuals)
+
+    // A cycle that is still reachable survives, intact, at the end of all that.
+    let live = Ring { id: 1, next: null }
+    let second = Ring { id: 2, next: live }
+    live.next = second
+    let scratch = 0
+    for index in 0..100000 {
+        scratch += self_cycle(index) % 2
+    }
+    io.println(live.next.expect("live cycle").id)
+    io.println(live.next.expect("live cycle").next.expect("live cycle").id)
+    io.println(scratch)
+}

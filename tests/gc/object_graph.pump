@@ -89,3 +89,97 @@ fn build(id: int, depth: int, shared: Tag): TreeNode {
 
 // Sums a value derived from every node's payload, so a variant whose pointer
 // map is wrong changes the total.
+fn walk(node: TreeNode?): int {
+    if node == null {
+        return 0
+    }
+    let here = node
+    let own = 0
+    match here.payload {
+        Payload.Empty => own = 1
+        Payload.Number(value) => own = value % 5
+        Payload.Pair(first, second) => own = (first + second) % 7
+        Payload.Labelled(tag) => own = tag.text.length
+    }
+    if here.tags.length != 2 {
+        return -1000000
+    }
+    return own + walk(here.left) + walk(here.right)
+}
+
+// Every non-root node's parent link still points at a node that claims it.
+fn check_parents(node: TreeNode?): int {
+    if node == null {
+        return 0
+    }
+    let here = node
+    let ok = 0
+    let left = here.left
+    if left != null {
+        let up = left.parent
+        if up != null && up.id == here.id {
+            ok += 1
+        }
+    }
+    let right = here.right
+    if right != null {
+        let up = right.parent
+        if up != null && up.id == here.id {
+            ok += 1
+        }
+    }
+    return ok + check_parents(here.left) + check_parents(here.right)
+}
+
+fn churn(count: int) {
+    let index = 0
+    while index < count {
+        let _waste = Tag { text: "waste" }
+        index += 1
+    }
+}
+
+fn main() {
+    let shared = Tag { text: "shared" }
+    let tree = build(1, 15, shared)
+
+    io.println(walk(tree))
+    io.println(check_parents(tree))
+
+    // Boxed values, tuples and interface values pointing into the same tree.
+    let boxes: [Box<TreeNode>] = []
+    for index in 0..1000 {
+        boxes.push(Box { value: tree })
+    }
+    let pairs: [(int, Tag)] = []
+    for index in 0..1000 {
+        pairs.push((index, shared))
+    }
+    let described: [Described] = []
+    for index in 0..1000 {
+        if index % 2 == 0 {
+            described.push(Leaf { id: index })
+        } else {
+            described.push(Branch { count: index })
+        }
+    }
+
+    churn(500000)
+
+    io.println(walk(tree))
+    io.println(check_parents(tree))
+    io.println(boxes[999].value.id)
+    io.println(pairs[999].1.text)
+    io.println(described[0].describe())
+    io.println(described[999].describe())
+    io.println(shared.text)
+
+    // Dropping the tree leaves a graph full of cycles unreachable; the churn
+    // that follows has to reclaim it rather than leak it.
+    let dropped: TreeNode? = tree
+    dropped = null
+    boxes.pop()
+    churn(500000)
+    io.println(dropped == null)
+    io.println(shared.text)
+}
