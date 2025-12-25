@@ -26,3 +26,65 @@ fn render(index: int): string {
     }
     return text
 }
+
+fn main() {
+    // A hundred thousand rows built, eleven kept. The intermediates alone run
+    // to the better part of a million strings.
+    let kept: [Row] = []
+    let total_length = 0
+    for index in 0..100000 {
+        let line = render(index)
+        total_length += line.length
+        if index % 10000 == 0 {
+            kept.push(Row { index: index, key: "row {index}", rendered: line })
+        }
+    }
+    io.println(total_length)
+    io.println(kept.length)
+
+    // Every kept row is byte for byte what `render` produced for it, rebuilt
+    // now, long after the original intermediates were collected.
+    let intact = 0
+    for row in kept {
+        if row.rendered == render(row.index) && row.key == "row {row.index}" {
+            intact += 1
+        }
+    }
+    io.println(intact)
+
+    // A growing accumulator: each round keeps the previous value alive for
+    // exactly one more allocation and then abandons it.
+    let accumulated = ""
+    for index in 0..2000 {
+        accumulated = "{accumulated}{index % 10}"
+    }
+    io.println(accumulated.length)
+    io.println(accumulated.slice(0, 12))
+    io.println(accumulated.slice(1988, 2000))
+
+    // Splitting and joining allocates an array of strings and then one large
+    // string, with the array of pieces dead immediately afterwards.
+    let pieces = strings.split(accumulated.slice(0, 200), "5")
+    io.println(pieces.length)
+    let joined = strings.join(pieces, "-")
+    io.println(joined.length)
+    io.println(strings.count(joined, "-"))
+
+    // Non-ASCII text, so the length in bytes and the length in characters are
+    // different numbers and both have to come back right.
+    let unicode = ""
+    for index in 0..500 {
+        unicode = unicode + "xin chào {index} "
+    }
+    io.println(unicode.length)
+    io.println(unicode.char_count())
+
+    // The rows are still intact after all of that.
+    let still = 0
+    for row in kept {
+        if row.rendered == render(row.index) {
+            still += 1
+        }
+    }
+    io.println(still)
+}
