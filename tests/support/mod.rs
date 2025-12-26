@@ -204,3 +204,194 @@ pub struct Expectation {
     pub texts: Vec<String>,
     pub absent: Vec<String>,
 }
+
+/// Reads and validates one `.err` file.
+pub fn parse_expectation(path: &Path) -> Expectation {
+    let source = read(path);
+    let mut expectation = Expectation::default();
+
+    for (index, line) in source.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (key, value) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
+        let value = value.trim().to_string();
+        match key {
+            "code" => expectation.codes.push(value),
+            "text" => expectation.texts.push(value),
+            "absent" => expectation.absent.push(value),
+            other => panic!(
+                "{}:{}: unknown key `{other}`; the keys are `code`, `text` and `absent`",
+                path.display(),
+                index + 1
+            ),
+        }
+    }
+
+    assert!(
+        !expectation.codes.is_empty(),
+        "{}: an expectation file must name at least one `code`",
+        path.display()
+    );
+    expectation
+}
+
+/// Compiles `tests/cases/fail/NAME.pump`, asserting it is rejected with the
+/// diagnostics `tests/cases/fail/NAME.err` describes.
+pub fn check_fail_case(name: &str) {
+    let directory = cases_dir("fail");
+    let program = directory.join(format!("{name}.pump"));
+    let expectation = parse_expectation(&directory.join(format!("{name}.err")));
+
+    let output = invoke(&["run", &program.display().to_string()]);
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+
+    if output.status.success() {
+        panic!(
+            "case `{name}` ({}) compiled and ran, but it must be rejected with {}.\
+             \n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}",
+            program.display(),
+            expectation.codes.join(", ")
+        );
+    }
+
+    let mut problems = Vec::new();
+    for code in &expectation.codes {
+        let marker = format!("error[{code}]");
+        if !stderr.contains(&marker) {
+            problems.push(format!("expected a diagnostic `{marker}`; there is none"));
+        }
+    }
+    for text in &expectation.texts {
+        if !stderr.contains(text) {
+            problems.push(format!("expected the output to contain {text:?}"));
+        }
+    }
+    for text in &expectation.absent {
+        if stderr.contains(text) {
+            problems.push(format!("expected the output NOT to contain {text:?}"));
+        }
+    }
+
+    if !problems.is_empty() {
+        let listing: Vec<String> = problems
+            .iter()
+            .map(|problem| format!("  - {problem}"))
+            .collect();
+        panic!(
+            "case `{name}` ({}) was rejected, but not as expected:\n{}\n\n--- stderr ---\n{stderr}",
+            program.display(),
+            listing.join("\n")
+        );
+    }
+}
+
+// ===== panic luc chay =====
+
+/// What a `.panic` file asks of a program that is expected to die.
+#[derive(Debug, Default)]
+pub struct PanicExpectation {
+    pub status: Option<i32>,
+    pub stdout: Vec<String>,
+    pub stderr: Vec<String>,
+}
+
+/// Runs `tests/cases/panic/NAME.pump`, asserting it dies the way
+/// `tests/cases/panic/NAME.panic` describes.
+pub fn check_panic_case(name: &str) {
+    let directory = cases_dir("panic");
+    let program = directory.join(format!("{name}.pump"));
+    let expectation = parse_panic_expectation(&directory.join(format!("{name}.panic")));
+
+    let output = invoke(&["run", &program.display().to_string()]);
+    let stdout = normalise(&String::from_utf8_lossy(&output.stdout));
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+
+    let mut problems = Vec::new();
+    if let Some(status) = expectation.status {
+        if output.status.code() != Some(status) {
+            problems.push(format!(
+                "expected exit status {status}, and it was {}",
+                output.status
+            ));
+        }
+    }
+    let expected_stdout = normalise(&expectation.stdout.join(
+        "
+",
+    ));
+    if stdout != expected_stdout {
+        problems.push(format!(
+            "expected stdout {expected_stdout:?}, and it was {stdout:?}"
+        ));
+    }
+    for text in &expectation.stderr {
+        if !stderr.contains(text) {
+            problems.push(format!("expected the panic message to contain {text:?}"));
+        }
+    }
+
+    if !problems.is_empty() {
+        let listing: Vec<String> = problems
+            .iter()
+            .map(|problem| format!("  - {problem}"))
+            .collect();
+        panic!(
+            "case `{name}` ({}) did not fail as expected:
+{}
+
+--- stderr ---
+{stderr}",
+            program.display(),
+            listing.join(
+                "
+"
+            )
+        );
+    }
+}
+
+fn parse_panic_expectation(path: &Path) -> PanicExpectation {
+    let source = read(path);
+    let mut expectation = PanicExpectation::default();
+
+    for (index, line) in source.lines().enumerate() {
+        let trimmed = line.trim_end();
+        if trimmed.trim().is_empty() || trimmed.trim_start().starts_with('#') {
+            continue;
+        }
+        let (key, value) = trimmed
+            .trim_start()
+            .split_once(char::is_whitespace)
+            .unwrap_or((trimmed.trim_start(), ""));
+        match key {
+            "status" => {
+                expectation.status = Some(value.trim().parse().unwrap_or_else(|error| {
+                    panic!(
+                        "{}:{}: `status` needs a number: {error}",
+                        path.display(),
+                        index + 1
+                    )
+                }));
+            }
+            "out" => expectation.stdout.push(value.trim_start().to_string()),
+            "err" => expectation.stderr.push(value.trim().to_string()),
+            other => panic!(
+                "{}:{}: unknown key `{other}`; the keys are `status`, `out` and `err`",
+                path.display(),
+                index + 1
+            ),
+        }
+    }
+
+    assert!(
+        !expectation.stderr.is_empty(),
+        "{}: a panic expectation must name the message with at least one `err`",
+        path.display()
+    );
+    expectation
+}
+
+// ===== so dang ky =====
