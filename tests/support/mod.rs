@@ -395,3 +395,154 @@ fn parse_panic_expectation(path: &Path) -> PanicExpectation {
 }
 
 // ===== so dang ky =====
+
+/// Asserts that the case files on disk are exactly the ones the suite lists,
+/// so that neither a stray program nor a missing expectation goes unnoticed.
+pub fn check_registry(kind: &str, answer_extension: &str, listed: &[&str]) {
+    let directory = cases_dir(kind);
+    let mut programs = Vec::new();
+    let mut answers = Vec::new();
+
+    let entries = std::fs::read_dir(&directory)
+        .unwrap_or_else(|error| panic!("cannot read `{}`: {error}", directory.display()));
+    for entry in entries {
+        let path = entry.expect("a readable directory entry").path();
+        let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .expect("a case file name is valid UTF-8")
+            .to_string();
+        if extension == "pump" {
+            programs.push(stem);
+        } else if extension == answer_extension {
+            answers.push(stem);
+        }
+    }
+
+    programs.sort();
+    answers.sort();
+    let mut listed: Vec<String> = listed.iter().map(|name| (*name).to_string()).collect();
+    listed.sort();
+
+    assert_eq!(
+        programs, listed,
+        "the `{kind}` programs on disk are not the cases the suite lists"
+    );
+    assert_eq!(
+        answers, listed,
+        "every `{kind}` program needs exactly one `.{answer_extension}` beside it"
+    );
+}
+
+/// The `project` variant: one directory per case, each holding `main.pump`.
+pub fn check_project_registry(listed: &[&str]) {
+    let directory = cases_dir("project");
+    let mut found = Vec::new();
+
+    let entries = std::fs::read_dir(&directory)
+        .unwrap_or_else(|error| panic!("cannot read `{}`: {error}", directory.display()));
+    for entry in entries {
+        let path = entry.expect("a readable directory entry").path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("a case directory name is valid UTF-8")
+            .to_string();
+        assert!(
+            path.join("main.pump").is_file(),
+            "project case `{name}` has no `main.pump`"
+        );
+        assert!(
+            path.join("expected.out").is_file(),
+            "project case `{name}` has no `expected.out`"
+        );
+        found.push(name);
+    }
+
+    found.sort();
+    let mut listed: Vec<String> = listed.iter().map(|name| (*name).to_string()).collect();
+    listed.sort();
+    assert_eq!(
+        found, listed,
+        "the project case directories are not the cases the suite lists"
+    );
+}
+
+// ===== in ket qua ra =====
+
+fn read(path: &Path) -> String {
+    std::fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("cannot read `{}`: {error}", path.display()))
+}
+
+fn normalise(text: &str) -> String {
+    let mut lines: Vec<&str> = text
+        .split('\n')
+        .map(|line| line.strip_suffix('\r').unwrap_or(line))
+        .map(str::trim_end)
+        .collect();
+    while lines.last().is_some_and(|line| line.is_empty()) {
+        lines.pop();
+    }
+    lines.join("\n")
+}
+
+fn failure_report(name: &str, program: &Path, headline: &str, output: &Output) -> String {
+    format!(
+        "case `{name}` ({}): {headline}.\nexit status: {}\n--- stdout ---\n{}--- stderr ---\n{}",
+        program.display(),
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    )
+}
+
+fn diff_report(
+    name: &str,
+    program: &Path,
+    expected: &str,
+    actual: &str,
+    output: &Output,
+) -> String {
+    let expected_lines: Vec<&str> = expected.lines().collect();
+    let actual_lines: Vec<&str> = actual.lines().collect();
+
+    let mut rows = Vec::new();
+    for index in 0..expected_lines.len().max(actual_lines.len()) {
+        let want = expected_lines.get(index).copied();
+        let got = actual_lines.get(index).copied();
+        let marker = if want == got { ' ' } else { '!' };
+        rows.push(format!(
+            "{marker} {:>3} | expected {:<44} | actual {}",
+            index + 1,
+            show(want),
+            show(got)
+        ));
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let trailer = if stderr.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n--- stderr ---\n{stderr}")
+    };
+
+    format!(
+        "case `{name}` ({}) produced the wrong output:\n{}{trailer}",
+        program.display(),
+        rows.join("\n")
+    )
+}
+
+fn show(line: Option<&str>) -> String {
+    match line {
+        Some(line) => format!("{line:?}"),
+        None => "<none>".to_string(),
+    }
+}
