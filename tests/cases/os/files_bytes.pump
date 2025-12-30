@@ -1,0 +1,73 @@
+// `io.read_bytes` and `io.write_bytes`: a byte travels as an `int`, one array
+// element each, and every element must be 0..255.
+//
+// Pump has no `u8`, so the array costs eight bytes per byte. Wasteful and
+// deliberate; see the note in `std/io.pump`.
+import io
+import os
+
+// A little-endian 32-bit number, built the way a compiler emitting an object
+// file has to build one.
+fn u32_le(value: int): [int] {
+    return [
+        value & 0xff,
+        (value >> 8) & 0xff,
+        (value >> 16) & 0xff,
+        (value >> 24) & 0xff,
+    ]
+}
+
+fn refuse_a_non_byte(path: string): string {
+    io.write_bytes(path, [1, 2, 256]) catch e {
+        return "refused"
+    }
+    return "wrote a 256, which it must not"
+}
+
+fn main() {
+    let scratch = os.args()[1]
+    let path = "{scratch}/blob.bin"
+
+    // Every corner of a byte, plus a NUL in the middle so nobody can pretend
+    // this is a string.
+    let bytes = [0, 1, 127, 128, 254, 255, 0, 65]
+    io.write_bytes(path, bytes) catch e {
+        io.println("write failed: {e.message()}")
+        return
+    }
+
+    let back = io.read_bytes(path) catch []
+    io.println("count {back.length}")
+    let same = back.length == bytes.length
+    let index = 0
+    while index < back.length && same {
+        if back[index] != bytes[index] {
+            same = false
+        }
+        index += 1
+    }
+    io.println("identical {same}")
+    io.println("first {back[0]} last {back[7]}")
+
+    // Shift and mask, then read the number back out of the file.
+    let header = u32_le(0x0a0b0c0d)
+    io.write_bytes("{scratch}/header.bin", header) catch e {
+        io.println("write failed: {e.message()}")
+        return
+    }
+    let read = io.read_bytes("{scratch}/header.bin") catch []
+    let value = read[0] | (read[1] << 8) | (read[2] << 16) | (read[3] << 24)
+    io.println("value {value}")
+
+    io.println(refuse_a_non_byte("{scratch}/never.bin"))
+    io.println(io.exists("{scratch}/never.bin"))
+
+    // Text written, bytes read: the same file seen two ways.
+    io.write_text("{scratch}/abc.txt", "ABC") catch e {
+        io.println("write failed: {e.message()}")
+        return
+    }
+    io.println_all(io.read_bytes("{scratch}/abc.txt") catch [])
+
+    io.println("ok   files_bytes")
+}

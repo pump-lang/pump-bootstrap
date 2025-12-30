@@ -1,0 +1,33 @@
+// `os.args()`: what the process was started with.
+//
+// The harness runs this as `pump run FILE -- SCRATCH PUMP`, so there are
+// exactly three: the source file, then the two the test passed. Only the
+// count and the shape are printed, because the paths differ per machine.
+import io
+import os
+import strings
+
+fn main() {
+    let all = os.args()
+    io.println("count {all.length}")
+
+    // args()[0] is the program: under `pump run` that is the `.pump` file.
+    io.println(strings.ends_with(all[0], "command_line.pump"))
+    io.println(all[0] == os.program())
+
+    // Past the program name is what the caller actually asked for.
+    let rest = os.options()
+    io.println("options {rest.length}")
+    io.println(rest[0] == all[1])
+    io.println(rest[1] == all[2])
+
+    // The scratch directory is a real place, which is the point of passing it.
+    let probe = "{rest[0]}/from-argv.txt"
+    io.write_text(probe, "written where argv said") catch e {
+        io.println("write failed: {e.message()}")
+        return
+    }
+    io.println(io.read_text(probe) catch "<unreadable>")
+
+    io.println("ok   command_line")
+}
