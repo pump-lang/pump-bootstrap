@@ -1,0 +1,36 @@
+// `io.read_text` and `io.write_text`, and the fact that a file that is not
+// there is a catchable error rather than the end of the process.
+//
+// `os.args()[1]` is a scratch directory the test harness made; nothing here
+// writes anywhere else.
+import io
+import os
+
+fn main() {
+    let scratch = os.args()[1]
+    let path = "{scratch}/note.txt"
+
+    io.write_text(path, "mot hai ba\nbon nam sau\n") catch e {
+        io.println("write failed: {e.message()}")
+        return
+    }
+
+    let text = io.read_text(path) catch "<unreadable>"
+    io.println("length {text.length}")
+    io.println(text)
+
+    // Writing again replaces, it does not append.
+    io.write_text(path, "bay") catch e {
+        io.println("rewrite failed: {e.message()}")
+        return
+    }
+    io.println(io.read_text(path) catch "<unreadable>")
+
+    // The whole point of `T!`: this does not kill the program.
+    let missing = io.read_text("{scratch}/there-is-no-such-file") catch "caught it"
+    io.println(missing)
+    io.println(io.exists(path))
+    io.println(io.exists("{scratch}/there-is-no-such-file"))
+
+    io.println("ok   files_text")
+}

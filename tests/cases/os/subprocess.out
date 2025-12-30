@@ -1,0 +1,8 @@
+hello from the child
+child exit 0
+no input exit 1
+true
+failed to start
+run_ok reported a non-zero exit
+hello from the child
+ok   subprocess
