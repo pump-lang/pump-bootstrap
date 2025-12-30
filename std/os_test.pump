@@ -1,0 +1,50 @@
+// Exercises `os`. Run it as
+//
+//     pump run std/os_test.pump -- alpha beta
+//
+// and compare, since what is under test here is mostly output:
+//
+//     args 3
+//     program ends with os_test.pump: true
+//     options 2
+//     alpha
+//     beta
+//     no such program: true
+//     the message names it: true
+//
+//     ok   os
+//
+// The file half of this - reading and writing - lives in tests/cases/os,
+// because it needs a scratch directory of its own and this file has nowhere
+// safe to write.
+
+import io
+import os
+import strings
+
+// A `catch` block has to leave the enclosing code (decision D-17), so the two
+// outcomes of a run come back as a string from a function of their own.
+fn attempt(command: string): string {
+    let code = os.run(command, []) catch error {
+        return error.message()
+    }
+    return "it ran and returned {code}"
+}
+
+fn main() {
+    let all = os.args()
+    io.println("args {all.length}")
+    io.println("program ends with os_test.pump: {strings.ends_with(os.program(), "os_test.pump")}")
+
+    let rest = os.options()
+    io.println("options {rest.length}")
+    io.println_all(rest)
+
+    // A program that is not there is a `fail`, not a panic and not a code.
+    let missing = attempt("pump-there-is-no-such-program")
+    io.println("no such program: {!strings.starts_with(missing, "it ran")}")
+    io.println("the message names it: {strings.contains(missing, "pump-there-is-no-such-program")}")
+
+    io.blank_line()
+    io.println("ok   os")
+}

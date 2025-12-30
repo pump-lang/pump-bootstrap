@@ -1,0 +1,72 @@
+// The `os` module: the command line, and running another program.
+//
+// With `io`'s file half, this is the whole of what a self-hosting compiler
+// needs from the operating system. It reads what it was told to compile, it
+// writes what it produced, and it calls the linker. Nothing here existed
+// before this release, and that is exactly why PumpGen could not be started.
+//
+// Two builtins sit underneath: `os_args` and `os_run`. `os_run` reports "the
+// program would not start" as a null, with the reason in `os_error()`;
+// `run` below turns that into a `fail` so it can be caught like any other
+// error. Note the line the wrapper draws: a program that ran and came back
+// with 1 is a SUCCESS that returns 1. Only never getting off the ground is a
+// failure. A linker that rejects its input has run perfectly well.
+//
+// There is no environment, no working directory, no stdout capture. A
+// compiler does not need them, and each one is a design question of its own.
+
+// Every argument the process was started with, `args()[0]` being the program
+// itself, spelled however the operating system spelled it.
+//
+// `pump run FILE -- a b c` hands `a b c` through, and `args()[0]` is then the
+// path of the `.pump` file being run. An executable made by `pump build` gets
+// whatever the shell gave it, so `args()[0]` is the executable.
+pub fn args(): [string] {
+    return os_args()
+}
+
+// The arguments past the program name, which is usually the interesting part.
+pub fn options(): [string] {
+    let all = os_args()
+    if all.length <= 1 {
+        return all.slice(0, 0)
+    }
+    return all.slice(1, all.length)
+}
+
+// The program name, or `""` when the operating system gave none.
+pub fn program(): string {
+    let all = os_args()
+    if all.length == 0 {
+        return ""
+    }
+    return all[0]
+}
+
+// Runs `command` with `arguments`, waits for it to finish, and gives back its
+// exit code.
+//
+// Fails only when the program could not be started at all - a name that is
+// not on disk, or a file that is not executable. A program that started and
+// exited non-zero is not a failure here; the code comes back and the caller
+// decides. Use `run_ok` when anything but zero is wrong.
+//
+// The child inherits this process's standard output, so its writing lands in
+// the same place as yours, in order.
+pub fn run(command: string, arguments: [string]): int! {
+    let code = os_run(command, arguments)
+    if code != null {
+        return code
+    }
+    fail "cannot run `{command}`: {os_error()}"
+}
+
+// Runs `command` and fails unless it exits with 0. This is the shape a build
+// step wants: call the linker, and stop if the linker was unhappy.
+pub fn run_ok(command: string, arguments: [string]): void! {
+    let code = run(command, arguments)!
+    if code != 0 {
+        fail "`{command}` exited with {code}"
+    }
+    return
+}
