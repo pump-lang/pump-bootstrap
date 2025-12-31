@@ -320,3 +320,236 @@ pub fn trim_end(text: string): string {
     }
     return ""
 }
+
+pub fn trim(text: string): string {
+    return trim_start(trim_end(text))
+}
+
+// -------------------------------------------------------------------------
+// Case
+// -------------------------------------------------------------------------
+
+pub fn to_upper(text: string): string {
+    return map_case(text, LOWER_A, LOWER_Z, -CASE_GAP)
+}
+
+pub fn to_lower(text: string): string {
+    return map_case(text, UPPER_A, UPPER_Z, CASE_GAP)
+}
+
+// -------------------------------------------------------------------------
+// Parsing
+// -------------------------------------------------------------------------
+
+// Reads a decimal integer, with an optional leading `+` or `-`. The whole
+// string must be digits; trim it first if it may carry spaces. Fails rather
+// than wrapping when the value will not fit an `int`.
+pub fn to_int(text: string): int! {
+    let index = 0
+    let negative = false
+    if text.length > 0 {
+        let lead = text.byte_at(0)
+        if lead == PLUS || lead == MINUS {
+            negative = lead == MINUS
+            index = 1
+        }
+    }
+    if index == text.length {
+        fail "`{text}` is not an integer"
+    }
+
+    // The digits accumulate as a negative number so that the most negative
+    // int, whose magnitude has no positive counterpart, still parses.
+    let value = 0
+    while index < text.length {
+        let digit = text.byte_at(index) - DIGIT_ZERO
+        if digit < 0 || digit > 9 {
+            fail "`{text}` is not an integer"
+        }
+        if value < (INT_MIN + digit) / 10 {
+            fail "`{text}` does not fit an int"
+        }
+        value = value * 10 - digit
+        index += 1
+    }
+
+    if negative {
+        return value
+    }
+    if value == INT_MIN {
+        fail "`{text}` does not fit an int"
+    }
+    return -value
+}
+
+// Reads a decimal float: an optional sign, digits, an optional fraction, and
+// an optional `e`/`E` exponent. `"1"`, `"-2.5"` and `"6.02e23"` all parse.
+//
+// The result is within an ulp or so of the true value, not correctly rounded:
+// the digits are accumulated in floating point and scaled once at the end.
+// Values needing more than seventeen significant digits, or an exponent past
+// the float range, lose accuracy or reach infinity as IEEE 754 says.
+pub fn to_float(text: string): float! {
+    let index = 0
+    let negative = false
+    if text.length > 0 {
+        let lead = text.byte_at(0)
+        if lead == PLUS || lead == MINUS {
+            negative = lead == MINUS
+            index = 1
+        }
+    }
+
+    let digits = 0
+    let value = 0.0
+    while index < text.length && is_digit(text.byte_at(index)) {
+        value = value * 10.0 + float(text.byte_at(index) - DIGIT_ZERO)
+        digits += 1
+        index += 1
+    }
+
+    // Digits after the point are read as if they came before it, then undone
+    // by the scale below. One scaling keeps the rounding error to one step.
+    let scale = 0
+    if index < text.length && text.byte_at(index) == DOT {
+        index += 1
+        while index < text.length && is_digit(text.byte_at(index)) {
+            value = value * 10.0 + float(text.byte_at(index) - DIGIT_ZERO)
+            digits += 1
+            scale += 1
+            index += 1
+        }
+    }
+    if digits == 0 {
+        fail "`{text}` is not a number"
+    }
+
+    if index < text.length {
+        let marker = text.byte_at(index)
+        if marker != LOWER_E && marker != UPPER_E {
+            fail "`{text}` is not a number"
+        }
+        scale -= read_exponent(text, index + 1)!
+    }
+
+    let result = scale_by_power_of_ten(value, scale)
+    if negative {
+        return -result
+    }
+    return result
+}
+
+// -------------------------------------------------------------------------
+// Internals
+// -------------------------------------------------------------------------
+
+const INT_MIN: int = -9223372036854775807 - 1
+
+// Past this the scaling has already reached infinity or zero, and clamping
+// keeps the exponent well away from the overflow in `-exponent`.
+const MAX_SCALE: int = 1000
+
+fn matches_at(text: string, needle: string, start: int): bool {
+    if start < 0 || start + needle.length > text.length {
+        return false
+    }
+
+    let offset = 0
+    while offset < needle.length {
+        if text.byte_at(start + offset) != needle.byte_at(offset) {
+            return false
+        }
+        offset += 1
+    }
+    return true
+}
+
+fn is_space(code: int): bool {
+    return code == SPACE || code == TAB || code == NEWLINE || code == RETURN
+}
+
+fn is_digit(code: int): bool {
+    return code >= DIGIT_ZERO && code <= DIGIT_NINE
+}
+
+fn without_return(line: string): string {
+    if line.length > 0 && line.byte_at(line.length - 1) == RETURN {
+        return line.slice(0, line.length - 1)
+    }
+    return line
+}
+
+// Splits the range in half and joins the two answers, so the deepest string
+// is copied log2(n) times rather than n times.
+fn concat_range(parts: [string], start: int, end: int): string {
+    let count = end - start
+    if count <= 0 {
+        return ""
+    }
+    if count == 1 {
+        return parts[start]
+    }
+
+    let middle = start + count / 2
+    return concat_range(parts, start, middle) + concat_range(parts, middle, end)
+}
+
+// Shifts every byte in `[low, high]` by `delta`. ASCII case mapping never
+// touches a byte above 127, so multi-byte characters pass through untouched.
+fn map_case(text: string, low: int, high: int, delta: int): string {
+    let pieces: [string] = []
+    pieces.reserve(text.char_count())
+    for character in text.chars() {
+        let code = int(character)
+        if code >= low && code <= high {
+            pieces.push(string(char(code + delta)))
+        } else {
+            pieces.push(string(character))
+        }
+    }
+    return concat(pieces)
+}
+
+// The signed exponent that follows `e`, clamped to a harmless magnitude.
+fn read_exponent(text: string, start: int): int! {
+    let rest = text.slice(start, text.length)
+    if rest.length == 0 {
+        fail "`{text}` has no digits after its exponent"
+    }
+
+    let exponent = to_int(rest) catch {
+        fail "`{text}` has a malformed exponent"
+    }
+    if exponent > MAX_SCALE {
+        return MAX_SCALE
+    }
+    if exponent < -MAX_SCALE {
+        return -MAX_SCALE
+    }
+    return exponent
+}
+
+// `value` divided by 10^scale, by squaring. The scale is subtracted because
+// every fractional digit was read one place too high.
+fn scale_by_power_of_ten(value: float, scale: int): float {
+    let magnitude = 1.0
+    let factor = 10.0
+    let remaining = scale
+    if remaining < 0 {
+        remaining = -remaining
+    }
+    while remaining > 0 {
+        if remaining % 2 == 1 {
+            magnitude *= factor
+        }
+        remaining /= 2
+        if remaining > 0 {
+            factor *= factor
+        }
+    }
+
+    if scale < 0 {
+        return value * magnitude
+    }
+    return value / magnitude
+}

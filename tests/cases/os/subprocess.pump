@@ -1,0 +1,61 @@
+// `os.run`: start another program, wait for it, take its exit code.
+//
+// The program it starts is `pump` itself, whose path the harness passes as
+// `args()[2]`, on a source file this program writes first. Write a source
+// file, call the compiler on it, check the code that comes back - that is the
+// whole shape of a build step, and it is the shape PumpGen needs.
+//
+// The line to watch is the difference between the two kinds of bad news: a
+// program that ran and came back non-zero is a SUCCESS that returns a code,
+// while a program that never started at all is a `fail`.
+import io
+import os
+
+const CHILD: string = "fn main() \{\n    println(\"hello from the child\")\n\}\n"
+
+fn describe_missing(): string {
+    let code = os.run("pump-no-such-program-exists", []) catch e {
+        return "failed to start"
+    }
+    return "somehow ran and returned {code}"
+}
+
+fn describe_unhappy(compiler: string, source: string): string {
+    os.run_ok(compiler, ["run", source]) catch e {
+        return "run_ok reported a non-zero exit"
+    }
+    return "run_ok was happy, which is wrong"
+}
+
+fn main() {
+    let scratch = os.args()[1]
+    let compiler = os.args()[2]
+    let child = "{scratch}/child.pump"
+    let absent = "{scratch}/no-such-source.pump"
+
+    io.write_text(child, CHILD) catch e {
+        io.println("write failed: {e.message()}")
+        return
+    }
+
+    // The child inherits this process's standard output, so its line lands
+    // here, in order, before the line after it.
+    let good = os.run(compiler, ["run", child]) catch -1
+    io.println("child exit {good}")
+
+    // A source file that is not there makes the compiler exit non-zero. That
+    // is the child's business and not an error on this side.
+    let bad = os.run(compiler, ["run", absent]) catch -1
+    io.println("no input exit {bad}")
+    io.println(bad != 0)
+
+    io.println(describe_missing())
+    io.println(describe_unhappy(compiler, absent))
+
+    // A clean run, so `run_ok` has nothing to say.
+    os.run_ok(compiler, ["run", child]) catch e {
+        io.println("run_ok was unhappy about a clean run: {e.message()}")
+        return
+    }
+    io.println("ok   subprocess")
+}

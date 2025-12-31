@@ -4,7 +4,7 @@
 // stderr roi giet tien trinh. Code sinh ra dat mot terminator unreachable
 // ngay sau moi loi goi, nen quay ve la quay ve mot cho khong ton tai.
 //
-// Moi kieu panic ...
+// Moi kieu panic mot cua vao rieng chu khong dung chung mot cai nhan chuoi,
 // de code sinh ra khong phai dung mot cai string tren mot duong ma dang chuan
 // bi chet den noi.
 //

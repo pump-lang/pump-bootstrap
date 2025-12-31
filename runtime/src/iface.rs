@@ -6,7 +6,7 @@
 // tra la mot lan cap phat cho moi lan doi, ma doi thi it hon goi nhieu.
 //
 // Dispatch la hai lan nap cong mot lan goi gian tiep, va no xay ra het trong
-// code sinh ra, khong dong nao trong file
+// code sinh ra, khong dong nao trong file nay nam tren duong do. Slot k cua
 // itable o `itable + 24 + 8*k`, receiver di vao lam tham so vat ly so 0.
 //
 // closure: con tro code tho o +16, so capture o +24, roi moi capture mot con

@@ -208,7 +208,7 @@ fn mix(value: u64) -> u64 {
     let mut mixed = value ^ HASH_SEED;
     mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    mixed ^ (mixed >> 62)
+    mixed ^ (mixed >> 31)
 }
 
 unsafe fn hash_key(kind: u32, key: u64) -> u64 {

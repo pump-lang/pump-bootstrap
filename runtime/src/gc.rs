@@ -367,7 +367,7 @@ fn spill_callee_saved(slots: &mut [usize; SPILL_SLOTS]) {
             "mov [rax + 16], rdi",
             "mov [rax + 24], rsi",
             "mov [rax + 32], r12",
-            "mov [rax + 80], r13",
+            "mov [rax + 40], r13",
             "mov [rax + 48], r14",
             "mov [rax + 56], r15",
             in("rax") base,

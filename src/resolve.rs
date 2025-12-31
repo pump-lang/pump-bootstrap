@@ -1449,7 +1449,7 @@ fn describe_visibility(kind: VisibilityKind) -> &'static str {
     }
 }
 
-// kieu, dung nhu source viet (22)
+// kieu, dung nhu source viet (11)
 
 impl Resolver<'_> {
     fn resolve_type(&mut self, written: &TypeExpr, position: TypePosition) -> TypeId {

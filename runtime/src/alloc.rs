@@ -83,7 +83,7 @@ impl Chunk {
     }
 
     fn set_start(&mut self, granule: usize) {
-        self.starts[granule >> 6] |= 1u64 << (granule & 31);
+        self.starts[granule >> 6] |= 1u64 << (granule & 63);
     }
 
     fn clear_start(&mut self, granule: usize) {
@@ -404,3 +404,187 @@ pub(crate) fn heap() -> &'static mut Heap {
 }
 
 // ===== duong di cua mot lan cap phat =====
+
+fn allocate_block(size: usize) -> *mut u8 {
+    debug_assert!(size >= HEADER_SIZE && size % GRANULE == 0);
+
+    if heap().wants_collection(size) && crate::gc::can_collect() {
+        crate::gc::pump_gc_collect();
+    }
+
+    if let Some(block) = take_or_bump(size) {
+        return block;
+    }
+
+    // khong cho nao vua. Thu gom rac mot lan da roi hay di xin them he dieu hanh.
+    if crate::gc::can_collect() && !heap().collecting {
+        crate::gc::pump_gc_collect();
+        if let Some(block) = take_or_bump(size) {
+            return block;
+        }
+    }
+
+    heap().grow(size);
+    match take_or_bump(size) {
+        Some(block) => block,
+        None => crate::panic::abort_runtime("the heap could not satisfy an allocation"),
+    }
+}
+
+fn take_or_bump(size: usize) -> Option<*mut u8> {
+    let heap = heap();
+    match heap.take_free(size) {
+        Some(block) => Some(block),
+        None => heap.bump(size),
+    }
+}
+
+/// Cap mot object dung `size` byte da xoa sach, tinh ca header, roi ghi
+/// type_id, flags = 0 va size vao header cua no.
+#[no_mangle]
+pub extern "C" fn pump_alloc(type_id: u32, size: u64) -> *mut u8 {
+    // ai lam tron dung thi khong thay khac gi; ai lam sai thi it ra nhan
+    // duoc mot object hop le chu khong phai mot cai heap hong.
+    let size = align_object_size(size.max(HEADER_SIZE as u64)) as usize;
+    let block = allocate_block(size);
+
+    unsafe {
+        std::ptr::write_bytes(block.add(HEADER_SIZE), 0, size - HEADER_SIZE);
+        let header = &mut *(block as *mut ObjectHeader);
+        header.type_id = type_id;
+        header.flags = 0;
+        header.size = size as u64;
+    }
+
+    let heap = heap();
+    heap.bytes_in_use += size;
+    heap.bytes_allocated += size as u64;
+    block
+}
+
+/// Cap mot object TYPE_ID_BUFFER voi `payload_size` byte payload da xoa.
+#[no_mangle]
+pub extern "C" fn pump_alloc_buffer(payload_size: u64) -> *mut u8 {
+    pump_alloc(
+        TYPE_ID_BUFFER,
+        align_object_size(HEADER_SIZE as u64 + payload_size),
+    )
+}
+
+pub(crate) fn buffer_capacity(buffer: *mut u8) -> usize {
+    block_size(buffer) - HEADER_SIZE
+}
+
+// ===== so lieu de xem cho vui =====
+
+/// So byte ma object song dang chiem, tinh den lan cap phat hoac sweep gan nhat.
+pub fn heap_bytes_in_use() -> usize {
+    heap().bytes_in_use
+}
+
+/// So byte heap da lay cua he dieu hanh va chua tra lai.
+pub fn heap_bytes_reserved() -> usize {
+    heap().chunks.iter().map(|chunk| chunk.bytes).sum()
+}
+
+/// Tong so byte da phat ra tu luc chuong trinh chay.
+pub fn heap_bytes_allocated() -> u64 {
+    heap().bytes_allocated
+}
+
+/// Co bao nhieu object dang song trong heap.
+pub fn heap_object_count() -> usize {
+    let mut count = 0;
+    heap().for_each_object(|_| count += 1);
+    count
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing;
+
+    #[test]
+    fn an_allocation_is_zeroed_and_carries_its_header() {
+        let _guard = testing::guard();
+        let object = pump_alloc(99, 64);
+        unsafe {
+            let header = crate::header(object);
+            assert_eq!(header.type_id, 99);
+            assert_eq!(header.flags, 0);
+            assert_eq!(header.size, 64);
+            for offset in HEADER_SIZE..64 {
+                assert_eq!(*object.add(offset), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn a_request_is_rounded_up_to_sixteen() {
+        let _guard = testing::guard();
+        let object = pump_alloc(99, 17);
+        assert_eq!(unsafe { crate::header(object) }.size, 32);
+    }
+
+    #[test]
+    fn objects_do_not_overlap_and_are_aligned() {
+        let _guard = testing::guard();
+        let mut spans: Vec<(usize, usize)> = Vec::new();
+        for index in 0..500u64 {
+            let size = 16 + (index % 12) * 16;
+            let object = pump_alloc(16, size);
+            assert_eq!(object as usize % GRANULE, 0);
+            spans.push((object as usize, size as usize));
+        }
+        spans.sort_unstable();
+        for pair in spans.windows(2) {
+            assert!(pair[0].0 + pair[0].1 <= pair[1].0, "objects overlap");
+        }
+    }
+
+    #[test]
+    fn a_freed_block_is_reused() {
+        let _guard = testing::guard();
+        let first = pump_alloc(16, 256);
+        unsafe { crate::header(first) }.type_id = TYPE_ID_INVALID;
+        heap().push_free(first);
+        let second = pump_alloc(16, 256);
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn a_large_block_is_split_and_the_remainder_reused() {
+        let _guard = testing::guard();
+        let block = pump_alloc(16, 4096);
+        unsafe { crate::header(block) }.type_id = TYPE_ID_INVALID;
+        heap().push_free(block);
+
+        let head = pump_alloc(16, 1024);
+        assert_eq!(head, block);
+        let tail = unsafe { block.add(1024) };
+        let reused = pump_alloc(16, 3072);
+        assert_eq!(reused, tail);
+    }
+
+    #[test]
+    fn only_an_object_start_resolves_as_an_object() {
+        let _guard = testing::guard();
+        let object = pump_alloc(16, 64);
+        let address = object as usize;
+        assert_eq!(heap().object_at(address), Some(object));
+        assert_eq!(heap().object_at(address + 16), None);
+        assert_eq!(heap().object_at(address + 8), None);
+        assert_eq!(heap().object_at(address + 1), None);
+        assert_eq!(heap().object_at(0), None);
+    }
+
+    #[test]
+    fn a_buffer_carries_the_buffer_type_id() {
+        let _guard = testing::guard();
+        let buffer = pump_alloc_buffer(100);
+        let header = unsafe { crate::header(buffer) };
+        assert_eq!(header.type_id, TYPE_ID_BUFFER);
+        assert_eq!(header.size, 128);
+        assert_eq!(buffer_capacity(buffer), 112);
+    }
+}
